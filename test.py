@@ -1,364 +1,260 @@
 import RPi.GPIO as GPIO
 import time
-import threading
+import sys
+import select
+import tty
+import termios
 
-class ServoMotor:
+class SimpleServo:
     def __init__(self, gpio_pin=12):
         """
-        Серво мотор подключенный напрямую к Raspberry Pi 5
-        
-        Подключение:
-        • Красный (VCC) → 5V Raspberry Pi
-        • Черный/Коричневый (GND) → Ground Raspberry Pi  
-        • Желтый/Оранжевый (Signal) → GPIO 12
+        Простой серво контроллер
         """
         self.gpio_pin = gpio_pin
         self.current_angle = 90
-        self.is_sweeping = False
-        self.sweep_thread = None
         
         # Настройка GPIO
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(self.gpio_pin, GPIO.OUT)
         
-        # PWM с частотой 50Hz (стандарт для серво)
+        # PWM 50Hz
         self.pwm = GPIO.PWM(self.gpio_pin, 50)
         self.pwm.start(0)
         
-        print(f"🤖 Серво мотор подключен к GPIO {self.gpio_pin}")
+        print(f"🤖 Серво готово на GPIO {self.gpio_pin}")
         
-        # Устанавливаем начальную позицию
-        self.write(90)
-        time.sleep(1)
+        # Начальная позиция
+        self.move_to(90)
     
-    def angle_to_duty_cycle(self, angle):
+    def move_to(self, angle):
         """
-        Преобразование угла в duty cycle для PWM
-        0° = 2.5%, 90° = 7.5%, 180° = 12.5%
+        Поворот на угол
         """
         angle = max(0, min(180, angle))
         duty_cycle = 2.5 + (angle / 180.0) * 10.0
-        return duty_cycle
-    
-    def write(self, angle):
-        """
-        Поворот серво на указанный угол (0-180°)
-        """
-        angle = max(0, min(180, angle))
-        duty_cycle = self.angle_to_duty_cycle(angle)
         
         self.pwm.ChangeDutyCycle(duty_cycle)
         self.current_angle = angle
         
-        print(f"🎯 Серво повернуто на {angle}°")
-        time.sleep(0.5)  # Время для поворота
+        print(f"🎯 Угол: {angle}°")
+        time.sleep(0.3)  # Короткая пауза
     
-    def sweep(self, start_angle=0, end_angle=180, step=5, delay=0.1):
+    def turn_right(self, step=10):
         """
-        Плавное качание между углами
+        Поворот вправо
         """
-        print(f"🔄 Качание от {start_angle}° до {end_angle}°")
-        
-        # Движение к end_angle
-        if start_angle < end_angle:
-            for angle in range(start_angle, end_angle + 1, step):
-                self.write(angle)
-                time.sleep(delay)
-        else:
-            for angle in range(start_angle, end_angle - 1, -step):
-                self.write(angle)
-                time.sleep(delay)
+        new_angle = min(180, self.current_angle + step)
+        print("➡️  Вправо")
+        self.move_to(new_angle)
     
-    def continuous_sweep(self, start_angle=0, end_angle=180, speed=1):
+    def turn_left(self, step=10):
         """
-        Непрерывное качание в отдельном потоке
+        Поворот влево  
         """
-        if self.is_sweeping:
-            print("⚠️  Серво уже качается!")
-            return
-        
-        self.is_sweeping = True
-        
-        def sweep_motion():
-            print(f"🔄 Непрерывное качание: {start_angle}° ↔ {end_angle}°")
-            
-            while self.is_sweeping:
-                # Движение вперед
-                for angle in range(start_angle, end_angle + 1, 2):
-                    if not self.is_sweeping:
-                        break
-                    self.write(angle)
-                    time.sleep(0.05 / speed)
-                
-                # Движение назад
-                for angle in range(end_angle, start_angle - 1, -2):
-                    if not self.is_sweeping:
-                        break
-                    self.write(angle)
-                    time.sleep(0.05 / speed)
-        
-        self.sweep_thread = threading.Thread(target=sweep_motion)
-        self.sweep_thread.daemon = True
-        self.sweep_thread.start()
-    
-    def rotate_continuous(self, direction="clockwise", speed=2):
-        """
-        Имитация непрерывного вращения
-        """
-        if self.is_sweeping:
-            print("⚠️  Серво уже работает!")
-            return
-        
-        self.is_sweeping = True
-        
-        def continuous_rotation():
-            print(f"🔄 Непрерывное вращение ({direction})")
-            angle = self.current_angle
-            
-            while self.is_sweeping:
-                if direction == "clockwise":
-                    angle += 10
-                    if angle > 180:
-                        angle = 0
-                else:
-                    angle -= 10
-                    if angle < 0:
-                        angle = 180
-                
-                self.write(angle)
-                time.sleep(0.1 / speed)
-        
-        self.sweep_thread = threading.Thread(target=continuous_rotation)
-        self.sweep_thread.daemon = True
-        self.sweep_thread.start()
-    
-    def stop(self):
-        """
-        Остановка движения
-        """
-        if self.is_sweeping:
-            print("🛑 Остановка серво")
-            self.is_sweeping = False
-            if self.sweep_thread:
-                self.sweep_thread.join()
+        new_angle = max(0, self.current_angle - step)
+        print("⬅️  Влево")
+        self.move_to(new_angle)
     
     def center(self):
         """
-        Возврат в центральное положение (90°)
+        В центр
         """
-        print("🎯 Возврат в центр")
-        self.write(90)
-    
-    def test_basic_positions(self):
-        """
-        Тест основных позиций
-        """
-        print("🔧 Тест основных позиций...")
-        positions = [0, 45, 90, 135, 180, 90]
-        
-        for pos in positions:
-            print(f"📍 Позиция: {pos}°")
-            self.write(pos)
-            time.sleep(1)
-        
-        print("✅ Тест позиций завершен")
+        print("🎯 Центр")
+        self.move_to(90)
     
     def cleanup(self):
         """
-        Очистка ресурсов
+        Очистка
         """
-        self.stop()
         self.pwm.stop()
         GPIO.cleanup()
-        print("✅ Ресурсы очищены")
+        print("✅ Очищено")
 
-# Перевод Arduino кода
-class ArduinoStyleServo:
-    def __init__(self, pin=12):
-        self.servo = ServoMotor(pin)
-    
-    def attach(self, pin):
-        """Аналог servo.attach()"""
-        print(f"📌 Servo attached to GPIO {pin}")
-    
-    def write(self, angle):
-        """Аналог servo.write()"""
-        self.servo.write(angle)
-    
-    def cleanup(self):
-        self.servo.cleanup()
+def get_char():
+    """
+    Получение одного символа без Enter
+    """
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.cbreak(fd)
+        ch = sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return ch
 
-# Глобальный объект серво (как в Arduino)
-servomecatronicos = ArduinoStyleServo(pin=12)
-
-def setup():
-    """Arduino setup()"""
-    print("🚀 Setup...")
-    servomecatronicos.attach(12)
-    print("✅ Setup завершен!")
-
-def loop():
-    """Arduino loop() - один цикл"""
-    print("🔄 Loop...")
+def keyboard_control():
+    """
+    Управление с клавиатуры
+    """
+    servo = SimpleServo(gpio_pin=12)
     
-    time.sleep(2)                    # delay(2000)
-    servomecatronicos.write(90)      # servomecatronicos.write(90)
-    
-    time.sleep(2)                    # delay(2000)
-    servomecatronicos.write(180)     # servomecatronicos.write(180)
-    
-    time.sleep(2)                    # delay(2000)
-    servomecatronicos.write(0)       # servomecatronicos.write(0)
-    
-    print("✅ Loop завершен!")
-
-# Демонстрационные функции
-def demo_basic():
-    """Базовая демонстрация"""
-    servo = ServoMotor(gpio_pin=12)
+    print("\n" + "="*50)
+    print("🎮 УПРАВЛЕНИЕ СЕРВО С КЛАВИАТУРЫ")
+    print("="*50)
+    print("🔴 Q - ПОВОРОТ ВПРАВО")
+    print("🔵 E - ПОВОРОТ ВЛЕВО") 
+    print("🟡 S - ЦЕНТР")
+    print("🟢 X - ВЫХОД")
+    print("="*50)
+    print("Нажимайте клавиши (без Enter):")
     
     try:
-        print("\n=== БАЗОВАЯ ДЕМОНСТРАЦИЯ ===")
-        servo.test_basic_positions()
+        while True:
+            key = get_char().lower()
+            
+            if key == 'q':
+                servo.turn_right()
+            elif key == 'e':
+                servo.turn_left()
+            elif key == 's':
+                servo.center()
+            elif key == 'x':
+                print("👋 Выход...")
+                break
+            elif key == '\x03':  # Ctrl+C
+                break
+            else:
+                print(f"❓ Неизвестная клавиша: {key}")
+                
+    except KeyboardInterrupt:
+        print("\n⚠️  Остановлено")
+    finally:
+        servo.cleanup()
+
+def simple_control():
+    """
+    Упрощенное управление для терминалов без tty
+    """
+    servo = SimpleServo(gpio_pin=12)
+    
+    print("\n" + "="*50)
+    print("🎮 ПРОСТОЕ УПРАВЛЕНИЕ СЕРВО")
+    print("="*50)
+    print("Команды:")
+    print("q + Enter - ВПРАВО")
+    print("e + Enter - ВЛЕВО")
+    print("s + Enter - ЦЕНТР") 
+    print("x + Enter - ВЫХОД")
+    print("="*50)
+    
+    try:
+        while True:
+            command = input("Команда: ").lower().strip()
+            
+            if command == 'q':
+                servo.turn_right()
+            elif command == 'e':
+                servo.turn_left()
+            elif command == 's':
+                servo.center()
+            elif command == 'x':
+                print("👋 Выход...")
+                break
+            else:
+                print("❓ Используйте: q, e, s, x")
+                
+    except KeyboardInterrupt:
+        print("\n⚠️  Остановлено")
+    finally:
+        servo.cleanup()
+
+def test_basic():
+    """
+    Базовый тест (работает лучше всех)
+    """
+    servo = SimpleServo(gpio_pin=12)
+    
+    try:
+        print("🔧 Базовый тест...")
+        
+        angles = [90, 120, 90, 60, 90, 150, 90, 30, 90]
+        
+        for angle in angles:
+            servo.move_to(angle)
+            time.sleep(1)
+        
+        print("✅ Тест завершен")
         
     finally:
         servo.cleanup()
 
-def demo_sweeping():
-    """Демонстрация качания"""
-    servo = ServoMotor(gpio_pin=12)
-    
+# Быстрые функции
+def quick_right():
+    """Быстрый поворот вправо"""
+    servo = SimpleServo(12)
     try:
-        print("\n=== ДЕМОНСТРАЦИЯ КАЧАНИЯ ===")
-        
-        # Плавное качание
-        print("1️⃣  Плавное качание")
-        servo.sweep(30, 150, step=3, delay=0.05)
-        
-        time.sleep(1)
-        
-        # Непрерывное качание
-        print("2️⃣  Непрерывное качание (5 сек)")
-        servo.continuous_sweep(45, 135, speed=2)
-        time.sleep(5)
-        servo.stop()
-        
-        # Возврат в центр
+        servo.turn_right(30)
+    finally:
+        servo.cleanup()
+
+def quick_left():
+    """Быстрый поворот влево"""
+    servo = SimpleServo(12)
+    try:
+        servo.turn_left(30)
+    finally:
+        servo.cleanup()
+
+def quick_center():
+    """Быстрый центр"""
+    servo = SimpleServo(12)
+    try:
         servo.center()
-        
     finally:
         servo.cleanup()
-
-def demo_continuous_rotation():
-    """Демонстрация непрерывного вращения"""
-    servo = ServoMotor(gpio_pin=12)
-    
-    try:
-        print("\n=== НЕПРЕРЫВНОЕ ВРАЩЕНИЕ ===")
-        
-        print("🔄 Вращение по часовой (5 сек)")
-        servo.rotate_continuous("clockwise", speed=3)
-        time.sleep(5)
-        
-        print("🔄 Смена направления")
-        servo.stop()
-        time.sleep(0.5)
-        
-        servo.rotate_continuous("counterclockwise", speed=3)
-        time.sleep(5)
-        servo.stop()
-        
-        servo.center()
-        
-    finally:
-        servo.cleanup()
-
-def arduino_demo():
-    """Точная копия Arduino кода"""
-    try:
-        print("\n=== ARDUINO ДЕМОНСТРАЦИЯ ===")
-        
-        setup()
-        
-        # Запускаем несколько циклов
-        for i in range(3):
-            print(f"\n--- Цикл {i+1} ---")
-            loop()
-        
-    finally:
-        servomecatronicos.cleanup()
 
 # Основная программа
 if __name__ == "__main__":
-    print("🤖 СЕРВО МОТОР RASPBERRY PI 5")
-    print("=" * 50)
-    print("📌 Подключение: GPIO 12, 5V, GND")
+    print("🤖 ПРОСТОЕ УПРАВЛЕНИЕ СЕРВО")
+    print("="*40)
     
     choice = input("""
-Выберите демонстрацию:
-1 - Базовые позиции
-2 - Качание
-3 - Непрерывное вращение  
-4 - Arduino стиль код
-5 - Все демонстрации
+Выберите режим:
+1 - Управление клавишами (без Enter)
+2 - Простое управление (с Enter)
+3 - Базовый тест
+4 - Быстрые команды
 
-Введите номер (1-5): """)
+Введите номер (1-4): """)
     
     try:
         if choice == "1":
-            demo_basic()
+            keyboard_control()
         elif choice == "2":
-            demo_sweeping()
+            simple_control()
         elif choice == "3":
-            demo_continuous_rotation()
+            test_basic()
         elif choice == "4":
-            arduino_demo()
-        elif choice == "5":
-            print("🎬 Все демонстрации подряд:")
-            demo_basic()
-            time.sleep(2)
-            demo_sweeping()
-            time.sleep(2)
-            demo_continuous_rotation()
-            time.sleep(2)
-            arduino_demo()
+            print("\nБыстрые команды:")
+            print("quick_right()  - вправо")
+            print("quick_left()   - влево") 
+            print("quick_center() - центр")
+            test_basic()
         else:
-            print("❌ Неверный выбор, запускаю базовую демонстрацию")
-            demo_basic()
+            print("❌ Неверный выбор, запускаю простое управление")
+            simple_control()
             
-    except KeyboardInterrupt:
-        print("\n⚠️  Остановлено пользователем")
     except Exception as e:
         print(f"❌ Ошибка: {e}")
-    finally:
-        try:
-            GPIO.cleanup()
-        except:
-            pass
+        print("Попробуйте режим 2 (простое управление)")
+        simple_control()
 
-# Быстрые функции
-def quick_test():
-    """Быстрый тест серво"""
-    servo = ServoMotor(12)
-    try:
-        servo.write(0)
-        time.sleep(1)
-        servo.write(90)
-        time.sleep(1)
-        servo.write(180)
-        time.sleep(1)
-        servo.write(90)
-    finally:
-        servo.cleanup()
+# ИНСТРУКЦИЯ:
+"""
+🎮 КАК ИСПОЛЬЗОВАТЬ:
 
-def quick_arduino():
-    """Быстрый Arduino тест"""
-    try:
-        setup()
-        loop()
-    finally:
-        servomecatronicos.cleanup()
+Вариант 1 - Клавиши без Enter:
+python script.py -> выбрать 1 -> нажимать q/e/s/x
 
-# Использование:
-# quick_test()      # Быстрый тест
-# quick_arduino()   # Arduino стиль
+Вариант 2 - С Enter:  
+python script.py -> выбрать 2 -> вводить q/e/s/x + Enter
+
+Вариант 3 - Автотест:
+python script.py -> выбрать 3
+
+🔴 Q = ВПРАВО (увеличение угла)
+🔵 E = ВЛЕВО (уменьшение угла)  
+🟡 S = ЦЕНТР (90°)
+🟢 X = ВЫХОД
+"""
