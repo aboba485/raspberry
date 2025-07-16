@@ -1,293 +1,214 @@
 import RPi.GPIO as GPIO
 import time
-import threading
 
-class ServoDriverController:
-    def __init__(self, control_pin=15):
+class ServoMecatronicos:
+    def __init__(self, pin=3):
         """
-        Управление мотором через серво драйвер
-        control_pin - пин управления серво драйвером
-        
-        Подключение:
-        Raspberry Pi → Серво Драйвер:
-        • 5V → VCC 
-        • GND → GND
-        • GPIO 4 → Управление драйвером (возможно)
-        • GPIO 5 → Управление драйвером (возможно)
-        
-        Серво Драйвер → Мотор:
-        • Выход 15 → Мотор
+        Аналог Arduino Servo библиотеки
+        pin - GPIO пин для управления серво
         """
-        self.control_pin = control_pin
-        self.current_position = 90  # Средняя позиция
-        self.is_running = False
-        self.motor_thread = None
+        # Переводим Arduino пин в GPIO (если нужно)
+        # Arduino pin 3 обычно соответствует GPIO 17 на Raspberry Pi
+        if pin == 3:
+            self.gpio_pin = 17  # или другой GPIO по вашему подключению
+        else:
+            self.gpio_pin = pin
+            
+        print(f"🤖 Servo подключен к GPIO {self.gpio_pin}")
         
         # Настройка GPIO
         GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.control_pin, GPIO.OUT)
+        GPIO.setup(self.gpio_pin, GPIO.OUT)
         
-        # PWM для серво драйвера (50Hz стандарт)
-        self.pwm = GPIO.PWM(self.control_pin, 50)
+        # PWM с частотой 50Hz (стандарт для серво)
+        self.pwm = GPIO.PWM(self.gpio_pin, 50)
         self.pwm.start(0)
         
-        print("🤖 Серво драйвер контроллер инициализирован")
-        print(f"📌 Управляющий пин: {self.control_pin}")
+    def attach(self, pin):
+        """
+        Аналог servomecatronicos.attach(pin)
+        Уже выполнено в __init__
+        """
+        print(f"📌 Servo attached to pin {pin}")
         
-        # Установка начальной позиции
-        self.set_position(90)
-        time.sleep(1)
-    
-    def angle_to_duty_cycle(self, angle):
+    def write(self, angle):
         """
-        Преобразование угла в duty cycle
+        Аналог servomecatronicos.write(angle)
+        Поворот серво на указанный угол (0-180°)
         """
+        # Ограничиваем угол
         angle = max(0, min(180, angle))
+        
+        # Преобразуем угол в duty cycle
+        # 0° = 2.5%, 90° = 7.5%, 180° = 12.5%
         duty_cycle = 2.5 + (angle / 180.0) * 10.0
-        return duty_cycle
-    
-    def set_position(self, angle):
-        """
-        Установка позиции мотора
-        """
-        angle = max(0, min(180, angle))
-        duty_cycle = self.angle_to_duty_cycle(angle)
+        
+        # Устанавливаем позицию
         self.pwm.ChangeDutyCycle(duty_cycle)
-        self.current_position = angle
-        print(f"🎯 Позиция: {angle}°")
-        time.sleep(0.5)
-    
-    def rotate_continuous(self, direction="forward", speed=2):
-        """
-        Непрерывное вращение
-        """
-        if self.is_running:
-            print("⚠️  Мотор уже работает!")
-            return
         
-        self.is_running = True
+        print(f"🎯 Servo position: {angle}°")
         
-        def continuous_rotation():
-            print(f"🔄 Непрерывное вращение ({direction})")
-            angle = self.current_position
-            
-            while self.is_running:
-                if direction == "forward":
-                    angle += 5
-                    if angle > 180:
-                        angle = 0
-                else:
-                    angle -= 5
-                    if angle < 0:
-                        angle = 180
-                
-                duty_cycle = self.angle_to_duty_cycle(angle)
-                self.pwm.ChangeDutyCycle(duty_cycle)
-                self.current_position = angle
-                time.sleep(0.1 / speed)
-        
-        self.motor_thread = threading.Thread(target=continuous_rotation)
-        self.motor_thread.daemon = True
-        self.motor_thread.start()
-    
-    def stop(self):
-        """
-        Остановка мотора
-        """
-        print("🛑 Остановка мотора")
-        self.is_running = False
-        self.pwm.ChangeDutyCycle(0)  # Отключаем сигнал
-        time.sleep(0.5)
-    
-    def test_basic_positions(self):
-        """
-        Тест базовых позиций
-        """
-        print("🔧 Тест базовых позиций...")
-        positions = [0, 45, 90, 135, 180, 90]
-        
-        for pos in positions:
-            print(f"📍 Позиция {pos}°")
-            self.set_position(pos)
-            time.sleep(1)
-    
     def cleanup(self):
         """
         Очистка ресурсов
         """
-        self.stop()
         self.pwm.stop()
         GPIO.cleanup()
-        print("✅ Ресурсы очищены")
+        print("✅ Servo cleanup completed")
 
-# АЛЬТЕРНАТИВНЫЙ КОНТРОЛЛЕР для случая, если это DC мотор через драйвер
-class DCMotorThroughDriver:
-    def __init__(self, pin1=4, pin2=5):
-        """
-        DC мотор через драйвер с управлением по GPIO 4 и 5
-        """
-        self.pin1 = pin1
-        self.pin2 = pin2
-        
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.pin1, GPIO.OUT)
-        GPIO.setup(self.pin2, GPIO.OUT)
-        
-        # Останавливаем мотор
-        GPIO.output(self.pin1, GPIO.LOW)
-        GPIO.output(self.pin2, GPIO.LOW)
-        
-        print("🤖 DC мотор через драйвер инициализирован")
-        print(f"📌 Пины управления: {self.pin1}, {self.pin2}")
-    
-    def forward(self, duration=None):
-        """Вращение вперед"""
-        print("➡️  Мотор вперед")
-        GPIO.output(self.pin1, GPIO.HIGH)
-        GPIO.output(self.pin2, GPIO.LOW)
-        
-        if duration:
-            time.sleep(duration)
-            self.stop()
-    
-    def backward(self, duration=None):
-        """Вращение назад"""
-        print("⬅️  Мотор назад")
-        GPIO.output(self.pin1, GPIO.LOW)
-        GPIO.output(self.pin2, GPIO.HIGH)
-        
-        if duration:
-            time.sleep(duration)
-            self.stop()
-    
-    def stop(self):
-        """Остановка"""
-        print("🛑 Мотор остановлен")
-        GPIO.output(self.pin1, GPIO.LOW)
-        GPIO.output(self.pin2, GPIO.LOW)
-    
-    def test_motor(self):
-        """Базовый тест"""
-        print("🔧 Тест DC мотора...")
-        
-        print("1️⃣  Вперед 2 сек")
-        self.forward(2)
-        time.sleep(0.5)
-        
-        print("2️⃣  Назад 2 сек")
-        self.backward(2)
-        time.sleep(0.5)
-        
-        print("✅ Тест завершен")
-    
-    def cleanup(self):
-        """Очистка"""
-        self.stop()
-        GPIO.cleanup()
-        print("✅ GPIO очищены")
+# Создаем объект серво (аналог Servo servomecatronicos;)
+servomecatronicos = ServoMecatronicos()
 
-# ДИАГНОСТИЧЕСКАЯ ФУНКЦИЯ
-def diagnose_setup():
+def setup():
     """
-    Диагностика подключения
+    Аналог void setup() в Arduino
     """
-    print("🔍 ДИАГНОСТИКА ПОДКЛЮЧЕНИЯ")
-    print("=" * 40)
+    print("🚀 Setup started...")
+    servomecatronicos.attach(3)  # Подключаем к пину 3 (GPIO 17)
+    print("✅ Setup completed!")
+
+def loop():
+    """
+    Аналог void loop() в Arduino
+    Выполняется один раз (не бесконечный цикл)
+    """
+    print("🔄 Loop started...")
     
-    # Тест 1: Серво управление через пин 15
-    print("\n1️⃣  Тест серво управления (GPIO 15)")
-    try:
-        servo = ServoDriverController(control_pin=15)
-        servo.test_basic_positions()
-        servo.cleanup()
-        print("✅ Серво тест завершен")
-    except Exception as e:
-        print(f"❌ Ошибка серво: {e}")
-    
+    # delay(2000);
+    print("⏱️  Delay 2 seconds...")
     time.sleep(2)
     
-    # Тест 2: DC мотор через драйвер (GPIO 4,5)
-    print("\n2️⃣  Тест DC мотора (GPIO 4,5)")
-    try:
-        dc_motor = DCMotorThroughDriver(pin1=4, pin2=5)
-        dc_motor.test_motor()
-        dc_motor.cleanup()
-        print("✅ DC мотор тест завершен")
-    except Exception as e:
-        print(f"❌ Ошибка DC: {e}")
-
-# Основная демонстрация
-if __name__ == "__main__":
-    print("🤖 КОНТРОЛЛЕР МОТОРА ЧЕРЕЗ СЕРВО ДРАЙВЕР")
-    print("=" * 50)
+    # servomecatronicos.write(90);
+    servomecatronicos.write(90)
     
-    choice = input("""
-Выберите тип управления:
-1 - Серво управление (GPIO 15)
-2 - DC мотор (GPIO 4,5) 
-3 - Диагностика всех вариантов
-
-Введите номер (1-3): """)
+    # delay(2000);
+    print("⏱️  Delay 2 seconds...")
+    time.sleep(2)
     
+    # servomecatronicos.write(180);
+    servomecatronicos.write(180)
+    
+    # delay(2000);
+    print("⏱️  Delay 2 seconds...")
+    time.sleep(2)
+    
+    # servomecatronicos.write(0);
+    servomecatronicos.write(0)
+    
+    print("✅ Loop completed!")
+
+def main():
+    """
+    Основная функция - запускает setup() и loop()
+    """
     try:
-        if choice == "1":
-            # Серво управление
-            controller = ServoDriverController(control_pin=15)
-            
-            print("\n=== ДЕМО СЕРВО УПРАВЛЕНИЯ ===")
-            controller.test_basic_positions()
-            
-            print("\n🔄 Непрерывное вращение (5 сек)")
-            controller.rotate_continuous("forward", speed=3)
-            time.sleep(5)
-            controller.stop()
-            
-            controller.cleanup()
-            
-        elif choice == "2":
-            # DC мотор
-            controller = DCMotorThroughDriver()
-            
-            print("\n=== ДЕМО DC МОТОРА ===")
-            controller.test_motor()
-            
-            print("\n🔄 Длительное вращение")
-            controller.forward(3)
-            controller.backward(3)
-            
-            controller.cleanup()
-            
-        elif choice == "3":
-            # Диагностика
-            diagnose_setup()
-            
-        else:
-            print("❌ Неверный выбор")
+        # Выполняем setup (как в Arduino)
+        setup()
+        
+        # Выполняем loop несколько раз (или бесконечно)
+        print("\n" + "="*50)
+        print("🎮 Запуск Arduino-стиль программы...")
+        print("="*50)
+        
+        # Вариант 1: Один цикл (как в оригинале)
+        loop()
+        
+        # Вариант 2: Бесконечный цикл (раскомментируйте если нужно)
+        # while True:
+        #     loop()
+        #     time.sleep(1)  # Небольшая пауза между циклами
+        
+    except KeyboardInterrupt:
+        print("\n⚠️  Программа остановлена пользователем")
+    
+    finally:
+        servomecatronicos.cleanup()
+
+# Альтернативная версия с бесконечным циклом
+def main_infinite():
+    """
+    Версия с бесконечным циклом (как настоящий Arduino)
+    """
+    try:
+        setup()
+        
+        print("\n🔄 Запуск бесконечного цикла (Ctrl+C для остановки)...")
+        
+        while True:
+            loop()
+            time.sleep(0.1)  # Короткая пауза
             
     except KeyboardInterrupt:
-        print("\n⚠️  Остановлено пользователем")
+        print("\n⚠️  Программа остановлена")
+    finally:
+        servomecatronicos.cleanup()
+
+# Прямой перевод в функциональном стиле
+def arduino_style_direct():
+    """
+    Максимально точный перевод Arduino кода
+    """
+    # Глобальная переменная (как в Arduino)
+    global servomecatronicos
+    
+    try:
+        print("🎯 Прямой перевод Arduino кода:")
+        
+        # setup()
+        servomecatronicos.attach(3)
+        
+        # loop() - один раз
+        time.sleep(2)                    # delay(2000);
+        servomecatronicos.write(90)      # servomecatronicos.write(90);
+        time.sleep(2)                    # delay(2000);
+        servomecatronicos.write(180)     # servomecatronicos.write(180);
+        time.sleep(2)                    # delay(2000);
+        servomecatronicos.write(0)       # servomecatronicos.write(0);
+        
+        print("✅ Перевод выполнен!")
+        
     except Exception as e:
         print(f"❌ Ошибка: {e}")
     finally:
-        try:
-            GPIO.cleanup()
-        except:
-            pass
+        servomecatronicos.cleanup()
 
-# Быстрые функции
-def quick_servo_test():
-    """Быстрый тест серво"""
-    controller = ServoDriverController(15)
-    try:
-        controller.test_basic_positions()
-    finally:
-        controller.cleanup()
+if __name__ == "__main__":
+    print("🤖 ПЕРЕВОД ARDUINO КОДА НА PYTHON")
+    print("="*50)
+    
+    choice = input("""
+Выберите вариант запуска:
+1 - Один цикл (как в оригинале)
+2 - Бесконечный цикл (настоящий Arduino стиль)
+3 - Прямой перевод кода
 
-def quick_dc_test():
-    """Быстрый тест DC"""
-    controller = DCMotorThroughDriver()
+Введите номер (1-3): """)
+    
+    if choice == "1":
+        main()
+    elif choice == "2":
+        main_infinite()
+    elif choice == "3":
+        arduino_style_direct()
+    else:
+        print("❌ Неверный выбор, запускаю вариант 1")
+        main()
+
+# Быстрый запуск
+def quick_arduino_test():
+    """Быстрый тест Arduino кода"""
+    servo = ServoMecatronicos(pin=17)  # Используем GPIO 17
     try:
-        controller.test_motor()
-    finally:
-        controller.cleanup()
+        servo.attach(3)
         
+        # Последовательность из Arduino
+        positions = [90, 180, 0]
+        for pos in positions:
+            time.sleep(2)
+            servo.write(pos)
+            
+    finally:
+        servo.cleanup()
+
+# Использование:
+# quick_arduino_test()  # Быстрый тест
