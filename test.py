@@ -1,214 +1,302 @@
 import RPi.GPIO as GPIO
 import time
+import threading
 
-class ServoMecatronicos:
-    def __init__(self, pin=3):
+class ServoMotor:
+    def __init__(self, servo_pin=13):
         """
-        Аналог Arduino Servo библиотеки
-        pin - GPIO пин для управления серво
+        Управление серво мотором на GPIO 13
+        
+        Подключение:
+        • Красный (VCC) → 5V Raspberry Pi
+        • Черный/Коричневый (GND) → Ground Raspberry Pi  
+        • Желтый/Оранжевый (Signal) → GPIO 13
         """
-        # Переводим Arduino пин в GPIO (если нужно)
-        # Arduino pin 3 обычно соответствует GPIO 17 на Raspberry Pi
-        if pin == 3:
-            self.gpio_pin = 17  # или другой GPIO по вашему подключению
-        else:
-            self.gpio_pin = pin
-            
-        print(f"🤖 Servo подключен к GPIO {self.gpio_pin}")
+        self.servo_pin = servo_pin
+        self.current_angle = 90
+        self.is_running = False
+        self.rotation_thread = None
         
         # Настройка GPIO
         GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.gpio_pin, GPIO.OUT)
+        GPIO.setup(self.servo_pin, GPIO.OUT)
         
-        # PWM с частотой 50Hz (стандарт для серво)
-        self.pwm = GPIO.PWM(self.gpio_pin, 50)
+        # PWM 50Hz для серво
+        self.pwm = GPIO.PWM(self.servo_pin, 50)
         self.pwm.start(0)
         
-    def attach(self, pin):
-        """
-        Аналог servomecatronicos.attach(pin)
-        Уже выполнено в __init__
-        """
-        print(f"📌 Servo attached to pin {pin}")
+        print(f"🤖 Серво мотор подключен к GPIO {self.servo_pin}")
         
-    def write(self, angle):
+        # Устанавливаем начальную позицию
+        self.move_to(90)
+        time.sleep(1)
+    
+    def angle_to_duty_cycle(self, angle):
         """
-        Аналог servomecatronicos.write(angle)
+        Преобразование угла в duty cycle для PWM
+        0° = 2.5%, 90° = 7.5%, 180° = 12.5%
+        """
+        angle = max(0, min(180, angle))
+        duty_cycle = 2.5 + (angle / 180.0) * 10.0
+        return duty_cycle
+    
+    def move_to(self, angle):
+        """
         Поворот серво на указанный угол (0-180°)
         """
-        # Ограничиваем угол
         angle = max(0, min(180, angle))
+        duty_cycle = self.angle_to_duty_cycle(angle)
         
-        # Преобразуем угол в duty cycle
-        # 0° = 2.5%, 90° = 7.5%, 180° = 12.5%
-        duty_cycle = 2.5 + (angle / 180.0) * 10.0
-        
-        # Устанавливаем позицию
         self.pwm.ChangeDutyCycle(duty_cycle)
+        self.current_angle = angle
         
-        print(f"🎯 Servo position: {angle}°")
+        print(f"🎯 Серво: {angle}°")
+        time.sleep(0.5)  # Время для поворота
         
+        # Останавливаем PWM после поворота (экономия энергии)
+        self.pwm.ChangeDutyCycle(0)
+    
+    def sweep(self, start=0, end=180, step=5, delay=0.1):
+        """
+        Плавное качание между углами
+        """
+        print(f"🔄 Качание от {start}° до {end}°")
+        
+        # Туда
+        for angle in range(start, end + 1, step):
+            self.move_to(angle)
+            time.sleep(delay)
+        
+        # Обратно
+        for angle in range(end, start - 1, -step):
+            self.move_to(angle)
+            time.sleep(delay)
+    
+    def continuous_rotation(self, speed=1):
+        """
+        Имитация непрерывного вращения
+        (для обычных серво - поворот от 0 до 180 и обратно)
+        """
+        if self.is_running:
+            print("⚠️  Серво уже работает!")
+            return
+        
+        self.is_running = True
+        
+        def rotate():
+            print("🔄 Начинаю непрерывное вращение")
+            while self.is_running:
+                # Полный оборот: 0° → 180° → 0°
+                for angle in range(0, 181, 5):
+                    if not self.is_running:
+                        break
+                    self.move_to(angle)
+                    time.sleep(0.05 / speed)
+                
+                for angle in range(180, -1, -5):
+                    if not self.is_running:
+                        break
+                    self.move_to(angle)
+                    time.sleep(0.05 / speed)
+        
+        self.rotation_thread = threading.Thread(target=rotate)
+        self.rotation_thread.daemon = True
+        self.rotation_thread.start()
+    
+    def stop_rotation(self):
+        """
+        Остановка непрерывного вращения
+        """
+        if self.is_running:
+            print("🛑 Остановка вращения")
+            self.is_running = False
+            if self.rotation_thread:
+                self.rotation_thread.join()
+    
+    def center(self):
+        """
+        Возврат в центральное положение
+        """
+        print("🎯 Возврат в центр")
+        self.move_to(90)
+    
+    def test_basic_positions(self):
+        """
+        Тест основных позиций
+        """
+        print("🔧 Тест основных позиций...")
+        positions = [0, 45, 90, 135, 180, 90]
+        
+        for pos in positions:
+            print(f"📍 Позиция: {pos}°")
+            self.move_to(pos)
+            time.sleep(1)
+    
+    def arduino_sequence(self):
+        """
+        Последовательность из Arduino кода
+        """
+        print("🎮 Выполнение Arduino последовательности...")
+        
+        time.sleep(2)
+        self.move_to(90)
+        
+        time.sleep(2)
+        self.move_to(180)
+        
+        time.sleep(2)
+        self.move_to(0)
+        
+        print("✅ Arduino последовательность завершена")
+    
     def cleanup(self):
         """
         Очистка ресурсов
         """
+        self.stop_rotation()
         self.pwm.stop()
         GPIO.cleanup()
-        print("✅ Servo cleanup completed")
+        print("✅ Серво отключен")
 
-# Создаем объект серво (аналог Servo servomecatronicos;)
-servomecatronicos = ServoMecatronicos()
-
-def setup():
+# Быстрые функции
+def quick_test():
     """
-    Аналог void setup() в Arduino
+    Быстрый тест серво
     """
-    print("🚀 Setup started...")
-    servomecatronicos.attach(3)  # Подключаем к пину 3 (GPIO 17)
-    print("✅ Setup completed!")
-
-def loop():
-    """
-    Аналог void loop() в Arduino
-    Выполняется один раз (не бесконечный цикл)
-    """
-    print("🔄 Loop started...")
+    servo = ServoMotor(servo_pin=13)
     
-    # delay(2000);
-    print("⏱️  Delay 2 seconds...")
-    time.sleep(2)
-    
-    # servomecatronicos.write(90);
-    servomecatronicos.write(90)
-    
-    # delay(2000);
-    print("⏱️  Delay 2 seconds...")
-    time.sleep(2)
-    
-    # servomecatronicos.write(180);
-    servomecatronicos.write(180)
-    
-    # delay(2000);
-    print("⏱️  Delay 2 seconds...")
-    time.sleep(2)
-    
-    # servomecatronicos.write(0);
-    servomecatronicos.write(0)
-    
-    print("✅ Loop completed!")
-
-def main():
-    """
-    Основная функция - запускает setup() и loop()
-    """
     try:
-        # Выполняем setup (как в Arduino)
-        setup()
-        
-        # Выполняем loop несколько раз (или бесконечно)
-        print("\n" + "="*50)
-        print("🎮 Запуск Arduino-стиль программы...")
-        print("="*50)
-        
-        # Вариант 1: Один цикл (как в оригинале)
-        loop()
-        
-        # Вариант 2: Бесконечный цикл (раскомментируйте если нужно)
-        # while True:
-        #     loop()
-        #     time.sleep(1)  # Небольшая пауза между циклами
+        print("🚀 БЫСТРЫЙ ТЕСТ СЕРВО")
+        servo.test_basic_positions()
         
     except KeyboardInterrupt:
-        print("\n⚠️  Программа остановлена пользователем")
-    
-    finally:
-        servomecatronicos.cleanup()
-
-# Альтернативная версия с бесконечным циклом
-def main_infinite():
-    """
-    Версия с бесконечным циклом (как настоящий Arduino)
-    """
-    try:
-        setup()
-        
-        print("\n🔄 Запуск бесконечного цикла (Ctrl+C для остановки)...")
-        
-        while True:
-            loop()
-            time.sleep(0.1)  # Короткая пауза
-            
-    except KeyboardInterrupt:
-        print("\n⚠️  Программа остановлена")
-    finally:
-        servomecatronicos.cleanup()
-
-# Прямой перевод в функциональном стиле
-def arduino_style_direct():
-    """
-    Максимально точный перевод Arduino кода
-    """
-    # Глобальная переменная (как в Arduino)
-    global servomecatronicos
-    
-    try:
-        print("🎯 Прямой перевод Arduino кода:")
-        
-        # setup()
-        servomecatronicos.attach(3)
-        
-        # loop() - один раз
-        time.sleep(2)                    # delay(2000);
-        servomecatronicos.write(90)      # servomecatronicos.write(90);
-        time.sleep(2)                    # delay(2000);
-        servomecatronicos.write(180)     # servomecatronicos.write(180);
-        time.sleep(2)                    # delay(2000);
-        servomecatronicos.write(0)       # servomecatronicos.write(0);
-        
-        print("✅ Перевод выполнен!")
-        
-    except Exception as e:
-        print(f"❌ Ошибка: {e}")
-    finally:
-        servomecatronicos.cleanup()
-
-if __name__ == "__main__":
-    print("🤖 ПЕРЕВОД ARDUINO КОДА НА PYTHON")
-    print("="*50)
-    
-    choice = input("""
-Выберите вариант запуска:
-1 - Один цикл (как в оригинале)
-2 - Бесконечный цикл (настоящий Arduino стиль)
-3 - Прямой перевод кода
-
-Введите номер (1-3): """)
-    
-    if choice == "1":
-        main()
-    elif choice == "2":
-        main_infinite()
-    elif choice == "3":
-        arduino_style_direct()
-    else:
-        print("❌ Неверный выбор, запускаю вариант 1")
-        main()
-
-# Быстрый запуск
-def quick_arduino_test():
-    """Быстрый тест Arduino кода"""
-    servo = ServoMecatronicos(pin=17)  # Используем GPIO 17
-    try:
-        servo.attach(3)
-        
-        # Последовательность из Arduino
-        positions = [90, 180, 0]
-        for pos in positions:
-            time.sleep(2)
-            servo.write(pos)
-            
+        print("\n⚠️  Тест прерван")
     finally:
         servo.cleanup()
 
-# Использование:
-# quick_arduino_test()  # Быстрый тест
+def arduino_style():
+    """
+    Выполнение в стиле Arduino
+    """
+    servo = ServoMotor(servo_pin=13)
+    
+    try:
+        print("🎮 ARDUINO СТИЛЬ")
+        
+        # Бесконечный цикл как в Arduino
+        while True:
+            servo.arduino_sequence()
+            time.sleep(1)  # Пауза между циклами
+            
+    except KeyboardInterrupt:
+        print("\n⚠️  Остановлено пользователем")
+    finally:
+        servo.cleanup()
+
+def continuous_spin():
+    """
+    Непрерывное вращение
+    """
+    servo = ServoMotor(servo_pin=13)
+    
+    try:
+        print("🔄 НЕПРЕРЫВНОЕ ВРАЩЕНИЕ")
+        servo.continuous_rotation(speed=2)
+        
+        # Крутим 10 секунд
+        time.sleep(10)
+        
+    except KeyboardInterrupt:
+        print("\n⚠️  Остановлено пользователем")
+    finally:
+        servo.cleanup()
+
+# Основная демонстрация
+if __name__ == "__main__":
+    print("🤖 УПРАВЛЕНИЕ СЕРВО МОТОРОМ GPIO 13")
+    print("=" * 50)
+    print("📌 Подключение:")
+    print("   Красный → 5V")
+    print("   Черный → GND")  
+    print("   Желтый → GPIO 13")
+    print("=" * 50)
+    
+    choice = input("""
+Выберите режим:
+1 - Быстрый тест позиций
+2 - Arduino стиль (бесконечный цикл)
+3 - Непрерывное вращение
+4 - Ручное управление
+5 - Качание
+
+Введите номер (1-5): """)
+    
+    try:
+        if choice == "1":
+            quick_test()
+            
+        elif choice == "2":
+            arduino_style()
+            
+        elif choice == "3":
+            continuous_spin()
+            
+        elif choice == "4":
+            # Ручное управление
+            servo = ServoMotor(servo_pin=13)
+            try:
+                print("\n🎮 РУЧНОЕ УПРАВЛЕНИЕ")
+                print("Введите угол (0-180) или 'q' для выхода:")
+                
+                while True:
+                    user_input = input("Угол: ").strip()
+                    
+                    if user_input.lower() == 'q':
+                        break
+                    
+                    try:
+                        angle = int(user_input)
+                        servo.move_to(angle)
+                    except ValueError:
+                        print("❌ Введите число от 0 до 180")
+                        
+            finally:
+                servo.cleanup()
+                
+        elif choice == "5":
+            # Качание
+            servo = ServoMotor(servo_pin=13)
+            try:
+                print("\n🔄 РЕЖИМ КАЧАНИЯ")
+                servo.sweep(start=30, end=150, step=3, delay=0.05)
+                
+            finally:
+                servo.cleanup()
+                
+        else:
+            print("❌ Неверный выбор, запускаю быстрый тест")
+            quick_test()
+            
+    except Exception as e:
+        print(f"❌ Ошибка: {e}")
+        try:
+            GPIO.cleanup()
+        except:
+            pass
+
+# Простая функция для тестирования
+def simple_move(angle):
+    """
+    Простой поворот на угол
+    """
+    servo = ServoMotor(13)
+    try:
+        servo.move_to(angle)
+        time.sleep(2)
+    finally:
+        servo.cleanup()
+
+# Примеры использования:
+# simple_move(90)  # Поворот на 90°
+# quick_test()     # Быстрый тест
+# arduino_style()  # Как в Arduino
