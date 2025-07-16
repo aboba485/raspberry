@@ -55,6 +55,20 @@ class SimpleServo:
         print("⬅️  Влево")
         self.move_to(new_angle)
     
+    def turn_right_full(self):
+        """
+        Полный поворот вправо (180°)
+        """
+        print("➡️  Полный поворот вправо (180°)")
+        self.move_to(180)
+    
+    def turn_left_full(self):
+        """
+        Полный поворот влево (0°)
+        """
+        print("⬅️  Полный поворот влево (0°)")
+        self.move_to(0)
+    
     def center(self):
         """
         В центр
@@ -132,9 +146,9 @@ def simple_control():
     print("🎮 ПРОСТОЕ УПРАВЛЕНИЕ СЕРВО")
     print("="*50)
     print("Команды:")
-    print("q + Enter - ВПРАВО")
-    print("e + Enter - ВЛЕВО")
-    print("s + Enter - ЦЕНТР") 
+    print("q + Enter - ПОЛНЫЙ ПОВОРОТ ВПРАВО (180°)")
+    print("e + Enter - ПОЛНЫЙ ПОВОРОТ ВЛЕВО (0°)")
+    print("s + Enter - ЦЕНТР (90°)") 
     print("x + Enter - ВЫХОД")
     print("="*50)
     
@@ -143,9 +157,9 @@ def simple_control():
             command = input("Команда: ").lower().strip()
             
             if command == 'q':
-                servo.turn_right()
+                servo.turn_right_full()
             elif command == 'e':
-                servo.turn_left()
+                servo.turn_left_full()
             elif command == 's':
                 servo.center()
             elif command == 'x':
@@ -253,8 +267,8 @@ python script.py -> выбрать 2 -> вводить q/e/s/x + Enter
 Вариант 3 - Автотест:
 python script.py -> выбрать 3
 
-🔴 Q = ВПРАВО (увеличение угла)
-🔵 E = ВЛЕВО (уменьшение угла)  
+🔴 Q = ПОЛНЫЙ ПОВОРОТ ВПРАВО (180°)
+🔵 E = ПОЛНЫЙ ПОВОРОТ ВЛЕВО (0°)  
 🟡 S = ЦЕНТР (90°)
 🟢 X = ВЫХОД
 """
