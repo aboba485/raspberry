@@ -12,7 +12,7 @@ class ServoDriverController:
         Raspberry Pi → Серво Драйвер:
         • 5V → VCC 
         • GND → GND
-        • GPIO 4 → Управление драйвером (возможно)
+        • GPIO 17 → Управление драйвером (возможно)
         • GPIO 5 → Управление драйвером (возможно)
         
         Серво Драйвер → Мотор:
@@ -122,7 +122,7 @@ class ServoDriverController:
 
 # АЛЬТЕРНАТИВНЫЙ КОНТРОЛЛЕР для случая, если это DC мотор через драйвер
 class DCMotorThroughDriver:
-    def __init__(self, pin1=4, pin2=5):
+    def __init__(self, pin1=17, pin2=5):
         """
         DC мотор через драйвер с управлением по GPIO 4 и 5
         """
@@ -206,10 +206,10 @@ def diagnose_setup():
     
     time.sleep(2)
     
-    # Тест 2: DC мотор через драйвер (GPIO 4,5)
-    print("\n2️⃣  Тест DC мотора (GPIO 4,5)")
+    # Тест 2: DC мотор через драйвер (GPIO 17,5)
+    print("\n2️⃣  Тест DC мотора (GPIO 17,5)")
     try:
-        dc_motor = DCMotorThroughDriver(pin1=4, pin2=5)
+        dc_motor = DCMotorThroughDriver(pin1=17, pin2=5)
         dc_motor.test_motor()
         dc_motor.cleanup()
         print("✅ DC мотор тест завершен")
@@ -224,7 +224,7 @@ if __name__ == "__main__":
     choice = input("""
 Выберите тип управления:
 1 - Серво управление (GPIO 15)
-2 - DC мотор (GPIO 4,5) 
+2 - DC мотор (GPIO 17,5) 
 3 - Диагностика всех вариантов
 
 Введите номер (1-3): """)
