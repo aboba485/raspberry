@@ -2,147 +2,77 @@ import RPi.GPIO as GPIO
 import time
 import threading
 
-class ServoController:
-    def __init__(self, servo_pin=15):
+class ServoDriverController:
+    def __init__(self, control_pin=15):
         """
-        Инициализация контроллера серво мотора
-        servo_pin - пин управления серво (обычно 15)
+        Управление мотором через серво драйвер
+        control_pin - пин управления серво драйвером
+        
+        Подключение:
+        Raspberry Pi → Серво Драйвер:
+        • 5V → VCC 
+        • GND → GND
+        • GPIO 4 → Управление драйвером (возможно)
+        • GPIO 5 → Управление драйвером (возможно)
+        
+        Серво Драйвер → Мотор:
+        • Выход 15 → Мотор
         """
-        self.servo_pin = servo_pin
-        self.current_angle = 90  # Начальная позиция
-        self.is_sweeping = False
-        self.sweep_thread = None
+        self.control_pin = control_pin
+        self.current_position = 90  # Средняя позиция
+        self.is_running = False
+        self.motor_thread = None
         
         # Настройка GPIO
         GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.servo_pin, GPIO.OUT)
+        GPIO.setup(self.control_pin, GPIO.OUT)
         
-        # PWM с частотой 50Hz для серво
-        self.pwm = GPIO.PWM(self.servo_pin, 50)
+        # PWM для серво драйвера (50Hz стандарт)
+        self.pwm = GPIO.PWM(self.control_pin, 50)
         self.pwm.start(0)
         
-        print("🤖 Контроллер серво мотора инициализирован")
+        print("🤖 Серво драйвер контроллер инициализирован")
+        print(f"📌 Управляющий пин: {self.control_pin}")
         
-        # Устанавливаем начальную позицию
-        self.move_to_angle(90)
+        # Установка начальной позиции
+        self.set_position(90)
         time.sleep(1)
     
     def angle_to_duty_cycle(self, angle):
         """
-        Преобразование угла в duty cycle для PWM
-        Стандартные серво: 0° = 2.5%, 90° = 7.5%, 180° = 12.5%
+        Преобразование угла в duty cycle
         """
-        # Ограничиваем угол от 0 до 180
         angle = max(0, min(180, angle))
-        
-        # Преобразуем в duty cycle (2.5% до 12.5%)
         duty_cycle = 2.5 + (angle / 180.0) * 10.0
         return duty_cycle
     
-    def move_to_angle(self, angle, smooth=True):
+    def set_position(self, angle):
         """
-        Поворот серво на указанный угол
-        angle: угол от 0 до 180 градусов
-        smooth: плавное движение
+        Установка позиции мотора
         """
         angle = max(0, min(180, angle))
-        
-        if smooth and abs(angle - self.current_angle) > 5:
-            # Плавное движение
-            step = 1 if angle > self.current_angle else -1
-            for a in range(int(self.current_angle), int(angle), step):
-                duty_cycle = self.angle_to_duty_cycle(a)
-                self.pwm.ChangeDutyCycle(duty_cycle)
-                time.sleep(0.02)  # 20ms задержка
-        
-        # Устанавливаем финальный угол
         duty_cycle = self.angle_to_duty_cycle(angle)
         self.pwm.ChangeDutyCycle(duty_cycle)
-        self.current_angle = angle
-        
-        print(f"🎯 Серво повернуто на {angle}°")
-        time.sleep(0.5)  # Время для стабилизации
+        self.current_position = angle
+        print(f"🎯 Позиция: {angle}°")
+        time.sleep(0.5)
     
-    def sweep(self, start_angle=0, end_angle=180, speed=1, continuous=False):
+    def rotate_continuous(self, direction="forward", speed=2):
         """
-        Качание серво между двумя углами
-        start_angle, end_angle: диапазон углов
-        speed: скорость (задержка между шагами)
-        continuous: непрерывное качание
+        Непрерывное вращение
         """
-        if self.is_sweeping:
-            print("⚠️  Серво уже качается! Остановите его сначала.")
+        if self.is_running:
+            print("⚠️  Мотор уже работает!")
             return
         
-        self.is_sweeping = True
-        
-        def sweep_motion():
-            print(f"🔄 Начинаю качание от {start_angle}° до {end_angle}°")
-            
-            direction = 1  # 1 = вперед, -1 = назад
-            current = start_angle
-            
-            while self.is_sweeping:
-                # Движение к цели
-                if direction == 1:
-                    for angle in range(int(current), int(end_angle) + 1, 2):
-                        if not self.is_sweeping:
-                            break
-                        self.move_to_angle(angle, smooth=False)
-                        time.sleep(0.02 * speed)
-                    current = end_angle
-                    direction = -1
-                else:
-                    for angle in range(int(current), int(start_angle) - 1, -2):
-                        if not self.is_sweeping:
-                            break
-                        self.move_to_angle(angle, smooth=False)
-                        time.sleep(0.02 * speed)
-                    current = start_angle
-                    direction = 1
-                
-                if not continuous:
-                    break
-        
-        self.sweep_thread = threading.Thread(target=sweep_motion)
-        self.sweep_thread.daemon = True
-        self.sweep_thread.start()
-    
-    def stop_sweep(self):
-        """
-        Остановка качания
-        """
-        if self.is_sweeping:
-            print("🛑 Остановка качания")
-            self.is_sweeping = False
-            if self.sweep_thread:
-                self.sweep_thread.join()
-    
-    def center(self):
-        """
-        Возврат в центральное положение (90°)
-        """
-        print("🎯 Возврат в центр")
-        self.move_to_angle(90)
-    
-    def rotate_continuous(self, direction="clockwise", speed=2):
-        """
-        Имитация непрерывного вращения (для обычных серво)
-        direction: "clockwise" или "counterclockwise"
-        speed: скорость (1-5)
-        """
-        if self.is_sweeping:
-            print("⚠️  Серво уже работает!")
-            return
-        
-        self.is_sweeping = True
+        self.is_running = True
         
         def continuous_rotation():
             print(f"🔄 Непрерывное вращение ({direction})")
-            angle = self.current_angle
+            angle = self.current_position
             
-            while self.is_sweeping:
-                if direction == "clockwise":
+            while self.is_running:
+                if direction == "forward":
                     angle += 5
                     if angle > 180:
                         angle = 0
@@ -151,85 +81,212 @@ class ServoController:
                     if angle < 0:
                         angle = 180
                 
-                self.move_to_angle(angle, smooth=False)
+                duty_cycle = self.angle_to_duty_cycle(angle)
+                self.pwm.ChangeDutyCycle(duty_cycle)
+                self.current_position = angle
                 time.sleep(0.1 / speed)
         
-        self.sweep_thread = threading.Thread(target=continuous_rotation)
-        self.sweep_thread.daemon = True
-        self.sweep_thread.start()
+        self.motor_thread = threading.Thread(target=continuous_rotation)
+        self.motor_thread.daemon = True
+        self.motor_thread.start()
+    
+    def stop(self):
+        """
+        Остановка мотора
+        """
+        print("🛑 Остановка мотора")
+        self.is_running = False
+        self.pwm.ChangeDutyCycle(0)  # Отключаем сигнал
+        time.sleep(0.5)
+    
+    def test_basic_positions(self):
+        """
+        Тест базовых позиций
+        """
+        print("🔧 Тест базовых позиций...")
+        positions = [0, 45, 90, 135, 180, 90]
+        
+        for pos in positions:
+            print(f"📍 Позиция {pos}°")
+            self.set_position(pos)
+            time.sleep(1)
     
     def cleanup(self):
         """
         Очистка ресурсов
         """
-        self.stop_sweep()
+        self.stop()
         self.pwm.stop()
         GPIO.cleanup()
         print("✅ Ресурсы очищены")
 
-# Демонстрация работы серво мотора
+# АЛЬТЕРНАТИВНЫЙ КОНТРОЛЛЕР для случая, если это DC мотор через драйвер
+class DCMotorThroughDriver:
+    def __init__(self, pin1=4, pin2=5):
+        """
+        DC мотор через драйвер с управлением по GPIO 4 и 5
+        """
+        self.pin1 = pin1
+        self.pin2 = pin2
+        
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(self.pin1, GPIO.OUT)
+        GPIO.setup(self.pin2, GPIO.OUT)
+        
+        # Останавливаем мотор
+        GPIO.output(self.pin1, GPIO.LOW)
+        GPIO.output(self.pin2, GPIO.LOW)
+        
+        print("🤖 DC мотор через драйвер инициализирован")
+        print(f"📌 Пины управления: {self.pin1}, {self.pin2}")
+    
+    def forward(self, duration=None):
+        """Вращение вперед"""
+        print("➡️  Мотор вперед")
+        GPIO.output(self.pin1, GPIO.HIGH)
+        GPIO.output(self.pin2, GPIO.LOW)
+        
+        if duration:
+            time.sleep(duration)
+            self.stop()
+    
+    def backward(self, duration=None):
+        """Вращение назад"""
+        print("⬅️  Мотор назад")
+        GPIO.output(self.pin1, GPIO.LOW)
+        GPIO.output(self.pin2, GPIO.HIGH)
+        
+        if duration:
+            time.sleep(duration)
+            self.stop()
+    
+    def stop(self):
+        """Остановка"""
+        print("🛑 Мотор остановлен")
+        GPIO.output(self.pin1, GPIO.LOW)
+        GPIO.output(self.pin2, GPIO.LOW)
+    
+    def test_motor(self):
+        """Базовый тест"""
+        print("🔧 Тест DC мотора...")
+        
+        print("1️⃣  Вперед 2 сек")
+        self.forward(2)
+        time.sleep(0.5)
+        
+        print("2️⃣  Назад 2 сек")
+        self.backward(2)
+        time.sleep(0.5)
+        
+        print("✅ Тест завершен")
+    
+    def cleanup(self):
+        """Очистка"""
+        self.stop()
+        GPIO.cleanup()
+        print("✅ GPIO очищены")
+
+# ДИАГНОСТИЧЕСКАЯ ФУНКЦИЯ
+def diagnose_setup():
+    """
+    Диагностика подключения
+    """
+    print("🔍 ДИАГНОСТИКА ПОДКЛЮЧЕНИЯ")
+    print("=" * 40)
+    
+    # Тест 1: Серво управление через пин 15
+    print("\n1️⃣  Тест серво управления (GPIO 15)")
+    try:
+        servo = ServoDriverController(control_pin=15)
+        servo.test_basic_positions()
+        servo.cleanup()
+        print("✅ Серво тест завершен")
+    except Exception as e:
+        print(f"❌ Ошибка серво: {e}")
+    
+    time.sleep(2)
+    
+    # Тест 2: DC мотор через драйвер (GPIO 4,5)
+    print("\n2️⃣  Тест DC мотора (GPIO 4,5)")
+    try:
+        dc_motor = DCMotorThroughDriver(pin1=4, pin2=5)
+        dc_motor.test_motor()
+        dc_motor.cleanup()
+        print("✅ DC мотор тест завершен")
+    except Exception as e:
+        print(f"❌ Ошибка DC: {e}")
+
+# Основная демонстрация
 if __name__ == "__main__":
-    # Создаем контроллер серво
-    servo = ServoController(servo_pin=15)
+    print("🤖 КОНТРОЛЛЕР МОТОРА ЧЕРЕЗ СЕРВО ДРАЙВЕР")
+    print("=" * 50)
+    
+    choice = input("""
+Выберите тип управления:
+1 - Серво управление (GPIO 15)
+2 - DC мотор (GPIO 4,5) 
+3 - Диагностика всех вариантов
+
+Введите номер (1-3): """)
     
     try:
-        print("\n=== ДЕМОНСТРАЦИЯ РАБОТЫ СЕРВО МОТОРА ===")
-        
-        # Тест 1: Основные позиции
-        print("\n1️⃣  Тест основных позиций")
-        positions = [0, 45, 90, 135, 180, 90]
-        for pos in positions:
-            servo.move_to_angle(pos)
-            time.sleep(1)
-        
-        # Тест 2: Качание
-        print("\n2️⃣  Тест качания (5 секунд)")
-        servo.sweep(30, 150, speed=2, continuous=True)
-        time.sleep(5)
-        servo.stop_sweep()
-        
-        # Тест 3: Быстрое качание
-        print("\n3️⃣  Быстрое качание (3 секунды)")
-        servo.sweep(60, 120, speed=0.5, continuous=True)
-        time.sleep(3)
-        servo.stop_sweep()
-        
-        # Тест 4: Имитация непрерывного вращения
-        print("\n4️⃣  Непрерывное вращение (5 секунд)")
-        servo.rotate_continuous("clockwise", speed=3)
-        time.sleep(5)
-        servo.stop_sweep()
-        
-        # Возврат в центр
-        servo.center()
-        
-        print("\n✅ Демонстрация завершена!")
-        
+        if choice == "1":
+            # Серво управление
+            controller = ServoDriverController(control_pin=15)
+            
+            print("\n=== ДЕМО СЕРВО УПРАВЛЕНИЯ ===")
+            controller.test_basic_positions()
+            
+            print("\n🔄 Непрерывное вращение (5 сек)")
+            controller.rotate_continuous("forward", speed=3)
+            time.sleep(5)
+            controller.stop()
+            
+            controller.cleanup()
+            
+        elif choice == "2":
+            # DC мотор
+            controller = DCMotorThroughDriver()
+            
+            print("\n=== ДЕМО DC МОТОРА ===")
+            controller.test_motor()
+            
+            print("\n🔄 Длительное вращение")
+            controller.forward(3)
+            controller.backward(3)
+            
+            controller.cleanup()
+            
+        elif choice == "3":
+            # Диагностика
+            diagnose_setup()
+            
+        else:
+            print("❌ Неверный выбор")
+            
     except KeyboardInterrupt:
-        print("\n⚠️  Прерывание пользователем")
-    
+        print("\n⚠️  Остановлено пользователем")
+    except Exception as e:
+        print(f"❌ Ошибка: {e}")
     finally:
-        servo.cleanup()
+        try:
+            GPIO.cleanup()
+        except:
+            pass
 
-# Простые функции для быстрого использования
-def quick_move(angle, pin=15):
-    """Быстрый поворот на угол"""
-    servo = ServoController(pin)
+# Быстрые функции
+def quick_servo_test():
+    """Быстрый тест серво"""
+    controller = ServoDriverController(15)
     try:
-        servo.move_to_angle(angle)
-        time.sleep(2)
+        controller.test_basic_positions()
     finally:
-        servo.cleanup()
+        controller.cleanup()
 
-def quick_sweep(duration=5, pin=15):
-    """Быстрое качание"""
-    servo = ServoController(pin)
+def quick_dc_test():
+    """Быстрый тест DC"""
+    controller = DCMotorThroughDriver()
     try:
-        servo.sweep(0, 180, speed=2, continuous=True)
-        time.sleep(duration)
+        controller.test_motor()
     finally:
-        servo.cleanup()
-
-# Примеры использования:
-# quick_move(45)  # Поворот на 45°
-# quick_sweep(10)  # Качание 10 секунд
+        controller.cleanup()
