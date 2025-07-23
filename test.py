@@ -1,274 +1,318 @@
 import RPi.GPIO as GPIO
 import time
-import sys
-import select
-import tty
-import termios
+import threading
 
-class SimpleServo:
-    def __init__(self, gpio_pin=12):
+class ServoDriverMotor:
+    def __init__(self, control_pin1=4, control_pin2=12, servo_channel=0):
         """
-        Простой серво контроллер
-        """
-        self.gpio_pin = gpio_pin
-        self.current_angle = 90
+        Motor control through servo driver
         
-        # Настройка GPIO
+        Connections:
+        Raspberry Pi → Servo Driver:
+        • 5V → VCC
+        • GND → GND  
+        • GPIO 4 → Control Pin 1
+        • GPIO 12 → Control Pin 2
+        
+        Motor → Servo Driver:
+        • Motor connected to channel 0 on driver
+        """
+        self.control_pin1 = control_pin1  # GPIO 4
+        self.control_pin2 = control_pin2  # GPIO 12
+        self.servo_channel = servo_channel
+        self.is_running = False
+        self.motor_thread = None
+        
+        # Setup GPIO
         GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.gpio_pin, GPIO.OUT)
+        GPIO.setup(self.control_pin1, GPIO.OUT)
+        GPIO.setup(self.control_pin2, GPIO.OUT)
         
-        # PWM 50Hz
-        self.pwm = GPIO.PWM(self.gpio_pin, 50)
-        self.pwm.start(0)
+        # Initialize pins to LOW
+        GPIO.output(self.control_pin1, GPIO.LOW)
+        GPIO.output(self.control_pin2, GPIO.LOW)
         
-        print(f"🤖 Серво готово на GPIO {self.gpio_pin}")
+        print(f"🤖 Servo Driver Motor Controller initialized")
+        print(f"📌 Control pins: GPIO {self.control_pin1}, GPIO {self.control_pin2}")
+        print(f"📌 Motor on driver channel: {self.servo_channel}")
+    
+    def motor_forward(self, duration=None):
+        """
+        Run motor forward
+        duration: time in seconds (None = indefinite)
+        """
+        print("➡️  Motor Forward")
+        GPIO.output(self.control_pin1, GPIO.HIGH)
+        GPIO.output(self.control_pin2, GPIO.LOW)
         
-        # Начальная позиция
-        self.move_to(90)
+        if duration:
+            time.sleep(duration)
+            self.motor_stop()
     
-    def move_to(self, angle):
+    def motor_backward(self, duration=None):
         """
-        Поворот на угол
+        Run motor backward  
+        duration: time in seconds (None = indefinite)
         """
-        angle = max(0, min(180, angle))
-        duty_cycle = 2.5 + (angle / 180.0) * 10.0
+        print("⬅️  Motor Backward")
+        GPIO.output(self.control_pin1, GPIO.LOW)
+        GPIO.output(self.control_pin2, GPIO.HIGH)
         
-        self.pwm.ChangeDutyCycle(duty_cycle)
-        self.current_angle = angle
+        if duration:
+            time.sleep(duration)
+            self.motor_stop()
+    
+    def motor_stop(self):
+        """
+        Stop motor
+        """
+        print("🛑 Motor Stopped")
+        GPIO.output(self.control_pin1, GPIO.LOW)
+        GPIO.output(self.control_pin2, GPIO.LOW)
+        self.is_running = False
+    
+    def motor_continuous(self, direction="forward"):
+        """
+        Run motor continuously in background thread
+        direction: "forward" or "backward"
+        """
+        if self.is_running:
+            print("⚠️  Motor already running!")
+            return
         
-        print(f"🎯 Угол: {angle}°")
-        time.sleep(0.3)  # Короткая пауза
+        self.is_running = True
+        
+        def continuous_run():
+            print(f"🔄 Continuous motor run: {direction}")
+            while self.is_running:
+                if direction == "forward":
+                    GPIO.output(self.control_pin1, GPIO.HIGH)
+                    GPIO.output(self.control_pin2, GPIO.LOW)
+                else:
+                    GPIO.output(self.control_pin1, GPIO.LOW)
+                    GPIO.output(self.control_pin2, GPIO.HIGH)
+                time.sleep(0.1)
+        
+        self.motor_thread = threading.Thread(target=continuous_run)
+        self.motor_thread.daemon = True
+        self.motor_thread.start()
     
-    def turn_right(self, step=10):
+    def reverse_direction(self):
         """
-        Поворот вправо
+        Reverse motor direction while running
         """
-        new_angle = min(180, self.current_angle + step)
-        print("➡️  Вправо")
-        self.move_to(new_angle)
+        if self.is_running:
+            print("🔄 Reversing direction")
+            # Read current state
+            pin1_state = GPIO.input(self.control_pin1)
+            pin2_state = GPIO.input(self.control_pin2)
+            
+            # Swap states
+            GPIO.output(self.control_pin1, pin2_state)
+            GPIO.output(self.control_pin2, pin1_state)
+        else:
+            print("⚠️  Motor not running")
     
-    def turn_left(self, step=10):
+    def test_motor(self):
         """
-        Поворот влево  
+        Basic motor test sequence
         """
-        new_angle = max(0, self.current_angle - step)
-        print("⬅️  Влево")
-        self.move_to(new_angle)
-    
-    def turn_right_full(self):
-        """
-        Полный поворот вправо (180°)
-        """
-        print("➡️  Полный поворот вправо (180°)")
-        self.move_to(180)
-    
-    def turn_left_full(self):
-        """
-        Полный поворот влево (0°)
-        """
-        print("⬅️  Полный поворот влево (0°)")
-        self.move_to(0)
-    
-    def center(self):
-        """
-        В центр
-        """
-        print("🎯 Центр")
-        self.move_to(90)
+        print("🔧 Testing motor connection...")
+        
+        # Test forward
+        print("1️⃣  Forward test (3 seconds)")
+        self.motor_forward(3)
+        time.sleep(0.5)
+        
+        # Test backward
+        print("2️⃣  Backward test (3 seconds)")
+        self.motor_backward(3)
+        time.sleep(0.5)
+        
+        # Test stop
+        print("3️⃣  Stop test")
+        self.motor_stop()
+        
+        print("✅ Motor test completed")
     
     def cleanup(self):
         """
-        Очистка
+        Clean up GPIO resources
         """
-        self.pwm.stop()
+        self.motor_stop()
+        time.sleep(0.5)
         GPIO.cleanup()
-        print("✅ Очищено")
-
-def get_char():
-    """
-    Получение одного символа без Enter
-    """
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-    try:
-        tty.cbreak(fd)
-        ch = sys.stdin.read(1)
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-    return ch
+        print("✅ GPIO cleaned up")
 
 def keyboard_control():
     """
-    Управление с клавиатуры
+    Keyboard control for motor
     """
-    servo = SimpleServo(gpio_pin=12)
+    motor = ServoDriverMotor(control_pin1=4, control_pin2=12, servo_channel=0)
     
     print("\n" + "="*50)
-    print("🎮 УПРАВЛЕНИЕ СЕРВО С КЛАВИАТУРЫ")
+    print("🎮 MOTOR CONTROL VIA SERVO DRIVER")
     print("="*50)
-    print("🔴 Q - ПОВОРОТ ВПРАВО")
-    print("🔵 E - ПОВОРОТ ВЛЕВО") 
-    print("🟡 S - ЦЕНТР")
-    print("🟢 X - ВЫХОД")
-    print("="*50)
-    print("Нажимайте клавиши (без Enter):")
-    
-    try:
-        while True:
-            key = get_char().lower()
-            
-            if key == 'q':
-                servo.turn_right()
-            elif key == 'e':
-                servo.turn_left()
-            elif key == 's':
-                servo.center()
-            elif key == 'x':
-                print("👋 Выход...")
-                break
-            elif key == '\x03':  # Ctrl+C
-                break
-            else:
-                print(f"❓ Неизвестная клавиша: {key}")
-                
-    except KeyboardInterrupt:
-        print("\n⚠️  Остановлено")
-    finally:
-        servo.cleanup()
-
-def simple_control():
-    """
-    Упрощенное управление для терминалов без tty
-    """
-    servo = SimpleServo(gpio_pin=12)
-    
-    print("\n" + "="*50)
-    print("🎮 ПРОСТОЕ УПРАВЛЕНИЕ СЕРВО")
-    print("="*50)
-    print("Команды:")
-    print("q + Enter - ПОЛНЫЙ ПОВОРОТ ВПРАВО (180°)")
-    print("e + Enter - ПОЛНЫЙ ПОВОРОТ ВЛЕВО (0°)")
-    print("s + Enter - ЦЕНТР (90°)") 
-    print("x + Enter - ВЫХОД")
+    print("Commands:")
+    print("f + Enter - FORWARD")
+    print("b + Enter - BACKWARD")
+    print("s + Enter - STOP")
+    print("c + Enter - CONTINUOUS FORWARD")
+    print("r + Enter - REVERSE DIRECTION")
+    print("t + Enter - TEST MOTOR")
+    print("x + Enter - EXIT")
     print("="*50)
     
     try:
         while True:
-            command = input("Команда: ").lower().strip()
+            command = input("Command: ").lower().strip()
             
-            if command == 'q':
-                servo.turn_right_full()
-            elif command == 'e':
-                servo.turn_left_full()
+            if command == 'f':
+                motor.motor_forward(2)  # Run for 2 seconds
+            elif command == 'b':
+                motor.motor_backward(2)  # Run for 2 seconds
             elif command == 's':
-                servo.center()
+                motor.motor_stop()
+            elif command == 'c':
+                motor.motor_continuous("forward")
+            elif command == 'r':
+                motor.reverse_direction()
+            elif command == 't':
+                motor.test_motor()
             elif command == 'x':
-                print("👋 Выход...")
+                print("👋 Exiting...")
                 break
             else:
-                print("❓ Используйте: q, e, s, x")
+                print("❓ Use: f, b, s, c, r, t, x")
                 
     except KeyboardInterrupt:
-        print("\n⚠️  Остановлено")
+        print("\n⚠️  Interrupted by user")
     finally:
-        servo.cleanup()
+        motor.cleanup()
 
-def test_basic():
+def demo_sequence():
     """
-    Базовый тест (работает лучше всех)
+    Demonstration sequence
     """
-    servo = SimpleServo(gpio_pin=12)
+    motor = ServoDriverMotor()
     
     try:
-        print("🔧 Базовый тест...")
+        print("\n=== MOTOR DEMO SEQUENCE ===")
         
-        angles = [90, 120, 90, 60, 90, 150, 90, 30, 90]
+        # Basic test
+        motor.test_motor()
         
-        for angle in angles:
-            servo.move_to(angle)
-            time.sleep(1)
+        print("\n🔄 Continuous operation demo")
         
-        print("✅ Тест завершен")
+        # Continuous forward
+        print("▶️  Continuous forward (5 seconds)")
+        motor.motor_continuous("forward")
+        time.sleep(5)
+        
+        # Reverse direction
+        print("🔄 Reversing direction")
+        motor.reverse_direction()
+        time.sleep(3)
+        
+        # Stop
+        motor.motor_stop()
+        
+        print("✅ Demo completed!")
         
     finally:
-        servo.cleanup()
+        motor.cleanup()
 
-# Быстрые функции
-def quick_right():
-    """Быстрый поворот вправо"""
-    servo = SimpleServo(12)
+def quick_test():
+    """
+    Quick motor test
+    """
+    motor = ServoDriverMotor(control_pin1=4, control_pin2=12)
+    
     try:
-        servo.turn_right(30)
+        print("🚀 Quick Test")
+        motor.motor_forward(1)
+        time.sleep(0.5)
+        motor.motor_backward(1)
+        motor.motor_stop()
+        print("✅ Quick test done")
     finally:
-        servo.cleanup()
+        motor.cleanup()
 
-def quick_left():
-    """Быстрый поворот влево"""
-    servo = SimpleServo(12)
-    try:
-        servo.turn_left(30)
-    finally:
-        servo.cleanup()
-
-def quick_center():
-    """Быстрый центр"""
-    servo = SimpleServo(12)
-    try:
-        servo.center()
-    finally:
-        servo.cleanup()
-
-# Основная программа
+# Main program
 if __name__ == "__main__":
-    print("🤖 ПРОСТОЕ УПРАВЛЕНИЕ СЕРВО")
-    print("="*40)
+    print("🤖 SERVO DRIVER MOTOR CONTROLLER")
+    print("="*50)
+    print("📌 Connections:")
+    print("   Raspberry Pi → Servo Driver:")
+    print("   • 5V → VCC")
+    print("   • GND → GND")
+    print("   • GPIO 4 → Control Pin 1")
+    print("   • GPIO 12 → Control Pin 2")
+    print("   • Motor → Driver Channel 0")
+    print("="*50)
     
     choice = input("""
-Выберите режим:
-1 - Управление клавишами (без Enter)
-2 - Простое управление (с Enter)
-3 - Базовый тест
-4 - Быстрые команды
+Select mode:
+1 - Keyboard Control
+2 - Demo Sequence  
+3 - Quick Test
+4 - Custom Test
 
-Введите номер (1-4): """)
+Enter number (1-4): """)
     
     try:
         if choice == "1":
             keyboard_control()
         elif choice == "2":
-            simple_control()
+            demo_sequence()
         elif choice == "3":
-            test_basic()
+            quick_test()
         elif choice == "4":
-            print("\nБыстрые команды:")
-            print("quick_right()  - вправо")
-            print("quick_left()   - влево") 
-            print("quick_center() - центр")
-            test_basic()
+            # Custom test area
+            motor = ServoDriverMotor()
+            try:
+                print("🔧 Custom test - modify this section as needed")
+                motor.test_motor()
+                
+                # Add your custom code here
+                print("Adding 5-second continuous run...")
+                motor.motor_continuous("forward")
+                time.sleep(5)
+                motor.motor_stop()
+                
+            finally:
+                motor.cleanup()
         else:
-            print("❌ Неверный выбор, запускаю простое управление")
-            simple_control()
+            print("❌ Invalid choice, running quick test")
+            quick_test()
             
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
-        print("Попробуйте режим 2 (простое управление)")
-        simple_control()
+        print(f"❌ Error: {e}")
+        print("💡 Check your connections and try again")
+    finally:
+        try:
+            GPIO.cleanup()
+        except:
+            pass
 
-# ИНСТРУКЦИЯ:
-"""
-🎮 КАК ИСПОЛЬЗОВАТЬ:
+# Quick functions for direct use
+def run_forward(seconds=2):
+    """Quick forward run"""
+    motor = ServoDriverMotor()
+    try:
+        motor.motor_forward(seconds)
+    finally:
+        motor.cleanup()
 
-Вариант 1 - Клавиши без Enter:
-python script.py -> выбрать 1 -> нажимать q/e/s/x
+def run_backward(seconds=2):
+    """Quick backward run"""
+    motor = ServoDriverMotor()
+    try:
+        motor.motor_backward(seconds)
+    finally:
+        motor.cleanup()
 
-Вариант 2 - С Enter:  
-python script.py -> выбрать 2 -> вводить q/e/s/x + Enter
-
-Вариант 3 - Автотест:
-python script.py -> выбрать 3
-
-🔴 Q = ПОЛНЫЙ ПОВОРОТ ВПРАВО (180°)
-🔵 E = ПОЛНЫЙ ПОВОРОТ ВЛЕВО (0°)  
-🟡 S = ЦЕНТР (90°)
-🟢 X = ВЫХОД
-"""
+# Usage examples:
+# run_forward(3)    # Run forward for 3 seconds
+# run_backward(2)   # Run backward for 2 seconds
+# quick_test()      # Quick test sequence
