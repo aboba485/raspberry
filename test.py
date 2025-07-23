@@ -1,337 +1,336 @@
 import RPi.GPIO as GPIO
 import time
-import smbus
+import sys
 
-class ServoDriverMotorControl:
+# Вариант 1: I2C серводрайвер (PCA9685)
+try:
+    import smbus
+    I2C_AVAILABLE = True
+except ImportError:
+    I2C_AVAILABLE = False
+    print("⚠️  smbus не установлен. Используйте: sudo apt install python3-smbus")
+
+class I2CServoDriver:
     def __init__(self, i2c_address=0x40, channel=0):
         """
-        Control motor connected to servo driver channel 0
+        Серводрайвер через I2C (например PCA9685)
         
-        Connections:
-        Raspberry Pi → Servo Driver (PCA9685):
-        • 5V → VCC (logic power)
-        • GND → GND
+        Подключение:
+        Raspberry Pi 5 → Серводрайвер:
+        • 5V → VCC
+        • GND → GND  
         • GPIO 2 (SDA) → SDA
         • GPIO 3 (SCL) → SCL
-        • External Power → V+ (motor power)
+        • Паурбанк → V+ (питание моторов)
         
-        Motor → Servo Driver:
-        • Motor connected to Channel 0 output
+        Мотор → Канал 0 драйвера
         """
+        if not I2C_AVAILABLE:
+            raise Exception("I2C библиотека недоступна")
+            
         self.i2c_address = i2c_address
         self.channel = channel
-        self.bus = None
+        self.bus = smbus.SMBus(1)
         
+        print(f"🤖 I2C серводрайвер: адрес 0x{i2c_address:02x}, канал {channel}")
+        
+        # Инициализация PCA9685
+        self.init_driver()
+    
+    def init_driver(self):
+        """Инициализация драйвера"""
         try:
-            # Initialize I2C bus
-            self.bus = smbus.SMBus(1)  # I2C bus 1 on Raspberry Pi
+            # Сброс
+            self.bus.write_byte_data(self.i2c_address, 0x00, 0x00)
             
-            # Initialize PCA9685
-            self.init_pca9685()
+            # Установка частоты PWM ~50Hz
+            prescale = int(25000000.0 / (4096 * 50.0) - 1)
             
-            print(f"🤖 Servo Driver initialized at address 0x{i2c_address:02x}")
-            print(f"📌 Motor on channel: {channel}")
+            old_mode = self.bus.read_byte_data(self.i2c_address, 0x00)
+            sleep_mode = (old_mode & 0x7F) | 0x10
+            self.bus.write_byte_data(self.i2c_address, 0x00, sleep_mode)
+            self.bus.write_byte_data(self.i2c_address, 0xFE, prescale)
+            self.bus.write_byte_data(self.i2c_address, 0x00, old_mode)
+            time.sleep(0.005)
+            self.bus.write_byte_data(self.i2c_address, 0x00, old_mode | 0xA1)
             
+            print("✅ I2C драйвер инициализирован")
         except Exception as e:
-            print(f"❌ Failed to initialize servo driver: {e}")
-            print("💡 Make sure I2C is enabled and driver is connected")
+            print(f"❌ Ошибка инициализации I2C: {e}")
     
-    def init_pca9685(self):
-        """
-        Initialize PCA9685 servo driver
-        """
-        # Reset the device
-        self.bus.write_byte_data(self.i2c_address, 0x00, 0x00)
-        
-        # Set PWM frequency to ~50Hz for servos
-        prescale = int(25000000.0 / (4096 * 50.0) - 1)
-        
-        # Go to sleep mode to set prescaler
-        old_mode = self.bus.read_byte_data(self.i2c_address, 0x00)
-        sleep_mode = (old_mode & 0x7F) | 0x10
-        self.bus.write_byte_data(self.i2c_address, 0x00, sleep_mode)
-        
-        # Set prescaler
-        self.bus.write_byte_data(self.i2c_address, 0xFE, prescale)
-        
-        # Wake up
-        self.bus.write_byte_data(self.i2c_address, 0x00, old_mode)
-        time.sleep(0.005)
-        
-        # Enable auto-increment
-        self.bus.write_byte_data(self.i2c_address, 0x00, old_mode | 0xA1)
-        
-        print("✅ PCA9685 initialized")
-    
-    def set_pwm(self, channel, on_time, off_time):
-        """
-        Set PWM for specific channel
-        channel: 0-15
-        on_time: 0-4095 (when to turn on)
-        off_time: 0-4095 (when to turn off)
-        """
+    def set_pwm(self, on_time, off_time):
+        """Установка PWM для канала 0"""
         try:
-            # Calculate register addresses for the channel
-            base_reg = 0x06 + 4 * channel
-            
-            # Write ON time (low and high bytes)
+            base_reg = 0x06 + 4 * self.channel
             self.bus.write_byte_data(self.i2c_address, base_reg, on_time & 0xFF)
             self.bus.write_byte_data(self.i2c_address, base_reg + 1, on_time >> 8)
-            
-            # Write OFF time (low and high bytes)  
             self.bus.write_byte_data(self.i2c_address, base_reg + 2, off_time & 0xFF)
             self.bus.write_byte_data(self.i2c_address, base_reg + 3, off_time >> 8)
-            
         except Exception as e:
-            print(f"❌ Failed to set PWM: {e}")
+            print(f"❌ Ошибка PWM: {e}")
     
-    def set_servo_angle(self, angle):
+    def rotate_motor(self, speed):
         """
-        Set servo angle (0-180 degrees) for channel 0
-        """
-        # Convert angle to PWM values
-        # Typical servo: 1ms = 0°, 1.5ms = 90°, 2ms = 180°
-        # For 50Hz: 1ms = ~204, 1.5ms = ~307, 2ms = ~409
-        
-        angle = max(0, min(180, angle))
-        
-        # Calculate PWM value
-        min_pulse = 204   # ~1ms
-        max_pulse = 409   # ~2ms
-        pulse_width = min_pulse + (angle / 180.0) * (max_pulse - min_pulse)
-        
-        # Set PWM (on at 0, off at calculated position)
-        self.set_pwm(self.channel, 0, int(pulse_width))
-        
-        print(f"🎯 Channel {self.channel} set to {angle}° (PWM: {int(pulse_width)})")
-    
-    def continuous_rotation_speed(self, speed):
-        """
-        For continuous rotation servos
-        speed: -100 to +100 (negative = reverse, positive = forward, 0 = stop)
+        Вращение мотора
+        speed: -100 до +100 (отрицательный = назад, положительный = вперед, 0 = стоп)
         """
         speed = max(-100, min(100, speed))
         
-        # Convert speed to pulse width
-        # Continuous servos: ~1.5ms = stop, <1.5ms = reverse, >1.5ms = forward
-        center_pulse = 307  # 1.5ms (stop)
-        max_range = 102     # Range for full speed
+        # Преобразование скорости в PWM
+        center_pulse = 307  # 1.5ms (стоп)
+        max_range = 102     # Диапазон для полной скорости
         
         pulse_width = center_pulse + (speed / 100.0) * max_range
+        self.set_pwm(0, int(pulse_width))
         
-        self.set_pwm(self.channel, 0, int(pulse_width))
-        
-        direction = "STOP" if speed == 0 else ("FORWARD" if speed > 0 else "REVERSE")
-        print(f"🔄 Channel {self.channel}: {direction} at {abs(speed)}% speed")
-    
-    def motor_stop(self):
-        """
-        Stop motor on channel 0
-        """
-        self.set_pwm(self.channel, 0, 0)  # Turn off PWM
-        print(f"🛑 Channel {self.channel} stopped")
-    
-    def test_servo_positions(self):
-        """
-        Test standard servo positions
-        """
-        print(f"\n🔧 Testing servo positions on channel {self.channel}...")
-        
-        positions = [0, 45, 90, 135, 180, 90]
-        
-        for pos in positions:
-            print(f"📍 Moving to {pos}°")
-            self.set_servo_angle(pos)
-            time.sleep(2)
-        
-        print("✅ Position test complete")
-    
-    def test_continuous_rotation(self):
-        """
-        Test continuous rotation (if motor supports it)
-        """
-        print(f"\n🔄 Testing continuous rotation on channel {self.channel}...")
-        
-        # Forward
-        print("➡️  Forward 50%")
-        self.continuous_rotation_speed(50)
-        time.sleep(3)
-        
-        # Stop
-        print("⏸️  Stop")
-        self.continuous_rotation_speed(0)
-        time.sleep(1)
-        
-        # Reverse
-        print("⬅️  Reverse 50%")
-        self.continuous_rotation_speed(-50)
-        time.sleep(3)
-        
-        # Stop
-        print("🛑 Final stop")
-        self.motor_stop()
-        
-        print("✅ Continuous rotation test complete")
-    
-    def scan_i2c_devices(self):
-        """
-        Scan for I2C devices to find servo driver
-        """
-        print("\n🔍 Scanning I2C bus for devices...")
-        
-        devices = []
-        for addr in range(0x03, 0x78):
-            try:
-                self.bus.read_byte(addr)
-                devices.append(addr)
-                print(f"   Found device at 0x{addr:02x}")
-            except:
-                pass
-        
-        if not devices:
-            print("❌ No I2C devices found!")
-            print("💡 Check connections and enable I2C")
+        if speed == 0:
+            print("🛑 Мотор остановлен")
+        elif speed > 0:
+            print(f"➡️  Мотор вперед: {speed}%")
         else:
-            print(f"✅ Found {len(devices)} device(s)")
-            
-        return devices
+            print(f"⬅️  Мотор назад: {abs(speed)}%")
+    
+    def stop_motor(self):
+        """Остановка мотора"""
+        self.set_pwm(0, 0)
+        print("🛑 Мотор остановлен")
 
-# Alternative: GPIO-based servo driver control
-class GPIOServoDriverControl:
-    def __init__(self, control_pin1=4, control_pin2=12, servo_channel=0):
+class GPIOServoDriver:
+    def __init__(self, pin1=4, pin2=12, channel=0):
         """
-        If your "servo driver" uses GPIO control instead of I2C
+        Серводрайвер через GPIO
+        
+        Подключение:
+        Raspberry Pi 5 → Серводрайвер:
+        • 5V → VCC
+        • GND → GND
+        • GPIO 4 → Управление 1
+        • GPIO 12 → Управление 2
+        • Паурбанк → Питание моторов
+        
+        Мотор → Канал 0 драйвера
         """
-        self.control_pin1 = control_pin1
-        self.control_pin2 = control_pin2
-        self.servo_channel = servo_channel
+        self.pin1 = pin1
+        self.pin2 = pin2
+        self.channel = channel
         
         GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.control_pin1, GPIO.OUT)
-        GPIO.setup(self.control_pin2, GPIO.OUT)
+        GPIO.setup(self.pin1, GPIO.OUT)
+        GPIO.setup(self.pin2, GPIO.OUT)
         
-        # Create PWM on one of the pins for servo control
-        self.pwm = GPIO.PWM(self.control_pin1, 50)  # 50Hz for servo
+        # PWM на одном из пинов для серво
+        self.pwm = GPIO.PWM(self.pin1, 50)  # 50Hz
         self.pwm.start(0)
         
-        print(f"🤖 GPIO Servo Driver - Channel {servo_channel}")
-        print(f"📌 Control pins: GPIO {control_pin1}, GPIO {control_pin2}")
+        print(f"🤖 GPIO серводрайвер: пины {pin1}, {pin2}, канал {channel}")
     
-    def set_servo_angle(self, angle):
+    def rotate_motor_angle(self, angle):
         """
-        Set servo angle using GPIO PWM
+        Поворот серво на угол (0-180°)
         """
         angle = max(0, min(180, angle))
-        
-        # Convert angle to duty cycle (servo standard)
         duty_cycle = 2.5 + (angle / 180.0) * 10.0
         
         self.pwm.ChangeDutyCycle(duty_cycle)
-        print(f"🎯 Channel {self.servo_channel} angle: {angle}°")
-        
+        print(f"🎯 Мотор на канале {self.channel}: {angle}°")
         time.sleep(0.5)
     
+    def rotate_motor_direction(self, direction="forward", duration=2):
+        """
+        Вращение мотора в направлении
+        """
+        if direction == "forward":
+            print(f"➡️  Мотор канал {self.channel} вперед ({duration}с)")
+            GPIO.output(self.pin1, GPIO.HIGH)
+            GPIO.output(self.pin2, GPIO.LOW)
+        else:
+            print(f"⬅️  Мотор канал {self.channel} назад ({duration}с)")
+            GPIO.output(self.pin1, GPIO.LOW)
+            GPIO.output(self.pin2, GPIO.HIGH)
+        
+        time.sleep(duration)
+        self.stop_motor()
+    
+    def stop_motor(self):
+        """Остановка мотора"""
+        GPIO.output(self.pin1, GPIO.LOW)
+        GPIO.output(self.pin2, GPIO.LOW)
+        self.pwm.ChangeDutyCycle(0)
+        print(f"🛑 Мотор канал {self.channel} остановлен")
+    
     def cleanup(self):
-        """
-        Clean up GPIO
-        """
+        """Очистка GPIO"""
         self.pwm.stop()
         GPIO.cleanup()
-        print("✅ GPIO cleaned up")
+        print("✅ GPIO очищены")
+
+def test_i2c_driver():
+    """Тест I2C драйвера"""
+    if not I2C_AVAILABLE:
+        print("❌ I2C недоступен")
+        return
+    
+    try:
+        print("\n🔧 Тест I2C серводрайвера...")
+        driver = I2CServoDriver(channel=0)
+        
+        # Тест вращения
+        speeds = [50, 0, -50, 0]
+        for speed in speeds:
+            driver.rotate_motor(speed)
+            time.sleep(3)
+        
+        driver.stop_motor()
+        print("✅ I2C тест завершен")
+        
+    except Exception as e:
+        print(f"❌ I2C тест не удался: {e}")
+
+def test_gpio_driver():
+    """Тест GPIO драйвера"""
+    try:
+        print("\n🔧 Тест GPIO серводрайвера...")
+        driver = GPIOServoDriver(pin1=4, pin2=12, channel=0)
+        
+        # Тест углов серво
+        print("1️⃣  Тест позиций серво:")
+        angles = [0, 90, 180, 90]
+        for angle in angles:
+            driver.rotate_motor_angle(angle)
+            time.sleep(2)
+        
+        # Тест направлений
+        print("2️⃣  Тест направлений:")
+        driver.rotate_motor_direction("forward", 3)
+        time.sleep(1)
+        driver.rotate_motor_direction("backward", 3)
+        
+        driver.cleanup()
+        print("✅ GPIO тест завершен")
+        
+    except Exception as e:
+        print(f"❌ GPIO тест не удался: {e}")
+        try:
+            GPIO.cleanup()
+        except:
+            pass
+
+def scan_i2c():
+    """Поиск I2C устройств"""
+    if not I2C_AVAILABLE:
+        print("❌ I2C недоступен")
+        return
+    
+    print("\n🔍 Поиск I2C устройств...")
+    bus = smbus.SMBus(1)
+    devices = []
+    
+    for addr in range(0x08, 0x78):
+        try:
+            bus.read_byte(addr)
+            devices.append(addr)
+            print(f"   Найдено устройство: 0x{addr:02x}")
+        except:
+            pass
+    
+    if not devices:
+        print("❌ I2C устройства не найдены")
+        print("💡 Проверьте подключение и включите I2C")
+    else:
+        print(f"✅ Найдено {len(devices)} устройств")
+
+def simple_motor_control():
+    """Простое управление мотором"""
+    print("\n🎮 ПРОСТОЕ УПРАВЛЕНИЕ МОТОРОМ")
+    print("="*40)
+    
+    # Пробуем сначала GPIO (проще)
+    driver = GPIOServoDriver(pin1=4, pin2=12, channel=0)
+    
+    try:
+        print("Команды:")
+        print("1 - Вперед")
+        print("2 - Назад") 
+        print("3 - Позиции серво (0°, 90°, 180°)")
+        print("0 - Стоп")
+        print("x - Выход")
+        
+        while True:
+            cmd = input("\nКоманда: ").strip()
+            
+            if cmd == "1":
+                driver.rotate_motor_direction("forward", 2)
+            elif cmd == "2":
+                driver.rotate_motor_direction("backward", 2)
+            elif cmd == "3":
+                for angle in [0, 90, 180]:
+                    driver.rotate_motor_angle(angle)
+                    time.sleep(2)
+            elif cmd == "0":
+                driver.stop_motor()
+            elif cmd == "x":
+                break
+            else:
+                print("❓ Используйте: 1, 2, 3, 0, x")
+    
+    except KeyboardInterrupt:
+        print("\n⚠️  Остановлено")
+    finally:
+        driver.cleanup()
 
 def main():
-    """
-    Main program to test servo driver motor control
-    """
-    print("🤖 SERVO DRIVER MOTOR CONTROL")
+    """Главная функция"""
+    print("🤖 УПРАВЛЕНИЕ МОТОРОМ ЧЕРЕЗ СЕРВОДРАЙВЕР")
     print("="*50)
-    print("📌 Motor connected to servo driver channel 0")
+    print("📌 Raspberry Pi 5 → драйвер: 5V, GND, GPIO4, GPIO12")
+    print("📌 Мотор → драйвер канал 0")
+    print("📌 Паурбанк → питание драйвера")
     
     choice = input("""
-Select driver type:
-1 - I2C Servo Driver (PCA9685-style)
-2 - GPIO Servo Driver  
-3 - Scan I2C devices first
-4 - Test both types
+Выберите режим:
+1 - Тест I2C драйвера (PCA9685)
+2 - Тест GPIO драйвера
+3 - Поиск I2C устройств
+4 - Простое управление
+5 - Оба теста
 
-Enter (1-4): """)
+Введите номер (1-5): """)
     
     try:
         if choice == "1":
-            # I2C servo driver
-            driver = ServoDriverMotorControl(channel=0)
-            
-            test_choice = input("""
-Test type:
-a - Servo positions (0-180°)
-b - Continuous rotation
-c - Both tests
-
-Enter (a-c): """).lower()
-            
-            if test_choice == "a":
-                driver.test_servo_positions()
-            elif test_choice == "b":
-                driver.test_continuous_rotation()
-            else:
-                driver.test_servo_positions()
-                time.sleep(2)
-                driver.test_continuous_rotation()
-        
+            test_i2c_driver()
         elif choice == "2":
-            # GPIO servo driver
-            driver = GPIOServoDriverControl(control_pin1=4, control_pin2=12, servo_channel=0)
-            
-            try:
-                print("Testing GPIO servo control...")
-                positions = [0, 90, 180, 90]
-                
-                for pos in positions:
-                    driver.set_servo_angle(pos)
-                    time.sleep(2)
-                    
-            finally:
-                driver.cleanup()
-        
+            test_gpio_driver()
         elif choice == "3":
-            # Scan I2C first
-            scanner = ServoDriverMotorControl()
-            devices = scanner.scan_i2c_devices()
-            
-            if 0x40 in devices:
-                print("✅ Found PCA9685 at default address 0x40")
-            elif devices:
-                print(f"💡 Try address 0x{devices[0]:02x}")
-        
+            scan_i2c()
         elif choice == "4":
-            print("Testing both types...")
-            
-            # Try I2C first
-            try:
-                print("\n1️⃣  Trying I2C servo driver...")
-                driver = ServoDriverMotorControl(channel=0)
-                driver.test_servo_positions()
-            except:
-                print("❌ I2C failed, trying GPIO...")
-                
-                # Try GPIO
-                driver = GPIOServoDriverControl(servo_channel=0)
-                try:
-                    driver.test_servo_positions = lambda: [driver.set_servo_angle(a) for a in [0, 90, 180]]
-                    driver.test_servo_positions()
-                finally:
-                    driver.cleanup()
+            simple_motor_control()
+        elif choice == "5":
+            print("🔄 Запуск всех тестов...")
+            scan_i2c()
+            time.sleep(2)
+            test_i2c_driver()
+            time.sleep(2) 
+            test_gpio_driver()
+        else:
+            print("❌ Неверный выбор, запускаю простое управление")
+            simple_motor_control()
     
     except KeyboardInterrupt:
-        print("\n⚠️  Test interrupted")
+        print("\n⚠️  Программа остановлена")
     except Exception as e:
-        print(f"❌ Error: {e}")
-    
-    print("\n💡 If motor doesn't move:")
-    print("1. Check if I2C is enabled: sudo raspi-config")
-    print("2. Verify servo driver type (PCA9685 vs other)")
-    print("3. Ensure external power connected to driver")
-    print("4. Check motor is on correct channel (0)")
+        print(f"❌ Ошибка: {e}")
+    finally:
+        try:
+            GPIO.cleanup()
+        except:
+            pass
 
 if __name__ == "__main__":
     main()
+    
+    print("\n💡 Если мотор не крутится:")
+    print("1. Проверьте питание от паурбанка")
+    print("2. Убедитесь что мотор на канале 0")
+    print("3. Для I2C: sudo raspi-config → Interface → I2C → Enable")
+    print("4. Проверьте подключение проводов")
