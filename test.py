@@ -239,82 +239,144 @@ def scan_i2c():
     else:
         print(f"✅ Найдено {len(devices)} устройств")
 
-def simple_motor_control():
-    """Простое управление мотором"""
-    print("\n🎮 ПРОСТОЕ УПРАВЛЕНИЕ МОТОРОМ")
+def simple_servo_control():
+    """Простое управление серво через PCA9685"""
+    print("\n🎮 УПРАВЛЕНИЕ СЕРВО ЧЕРЕЗ PCA9685")
     print("="*40)
     
-    # Пробуем сначала GPIO (проще)
-    driver = GPIOServoDriver(pin1=4, pin2=12, channel=0)
+    if not I2C_AVAILABLE:
+        print("❌ Установите smbus: sudo apt install python3-smbus")
+        return
     
     try:
-        print("Команды:")
-        print("1 - Вперед")
-        print("2 - Назад") 
-        print("3 - Позиции серво (0°, 90°, 180°)")
-        print("0 - Стоп")
+        driver = I2CServoDriver(channel=0)
+        
+        print("Команды для серво:")
+        print("0 - Угол 0°")
+        print("90 - Угол 90°") 
+        print("180 - Угол 180°")
+        print("+ - Вращение вперед")
+        print("- - Вращение назад")
+        print("s - Стоп")
         print("x - Выход")
         
         while True:
             cmd = input("\nКоманда: ").strip()
             
-            if cmd == "1":
-                driver.rotate_motor_direction("forward", 2)
-            elif cmd == "2":
-                driver.rotate_motor_direction("backward", 2)
-            elif cmd == "3":
-                for angle in [0, 90, 180]:
-                    driver.rotate_motor_angle(angle)
-                    time.sleep(2)
-            elif cmd == "0":
-                driver.stop_motor()
+            if cmd == "0":
+                driver.set_servo_angle(0)
+            elif cmd == "90":
+                driver.set_servo_angle(90)
+            elif cmd == "180":
+                driver.set_servo_angle(180)
+            elif cmd == "+":
+                driver.rotate_motor(50)
+            elif cmd == "-":
+                driver.rotate_motor(-50)
+            elif cmd == "s":
+                driver.rotate_motor(0)
             elif cmd == "x":
                 break
             else:
-                print("❓ Используйте: 1, 2, 3, 0, x")
+                print("❓ Используйте: 0, 90, 180, +, -, s, x")
     
     except KeyboardInterrupt:
         print("\n⚠️  Остановлено")
-    finally:
-        driver.cleanup()
+    except Exception as e:
+        print(f"❌ Ошибка: {e}")
+
+def check_pca9685_connection():
+    """Проверка подключения PCA9685"""
+    print("\n🔍 ПРОВЕРКА ПОДКЛЮЧЕНИЯ PCA9685")
+    print("="*40)
+    
+    if not I2C_AVAILABLE:
+        print("❌ Установите smbus: sudo apt install python3-smbus")
+        return
+    
+    try:
+        # Проверяем I2C
+        bus = smbus.SMBus(1)
+        
+        print("1️⃣  Поиск PCA9685 по адресу 0x40...")
+        try:
+            bus.read_byte_data(0x40, 0x00)
+            print("✅ PCA9685 найден по адресу 0x40!")
+        except:
+            print("❌ PCA9685 не найден по адресу 0x40")
+            
+        print("\n2️⃣  Поиск всех I2C устройств...")
+        devices = []
+        for addr in range(0x08, 0x78):
+            try:
+                bus.read_byte(addr)
+                devices.append(addr)
+                print(f"   Найдено: 0x{addr:02x}")
+            except:
+                pass
+                
+        if not devices:
+            print("❌ I2C устройства не найдены!")
+            print("💡 Проверьте:")
+            print("   • I2C включен: sudo raspi-config")
+            print("   • Провода SDA/SCL подключены")
+            print("   • Питание VCC подключено")
+            
+    except Exception as e:
+        print(f"❌ Ошибка I2C: {e}")
+
+# Добавляем функцию для установки угла серво
+def set_servo_angle(self, angle):
+    """Установка угла серво (0-180°)"""
+    angle = max(0, min(180, angle))
+    
+    # Стандартные значения для серво
+    min_pulse = 150   # ~0.6ms для 0°
+    max_pulse = 600   # ~2.4ms для 180°
+    
+    pulse_width = min_pulse + (angle / 180.0) * (max_pulse - min_pulse)
+    self.set_pwm(0, int(pulse_width))
+    
+    print(f"🎯 Серво канал {self.channel}: {angle}°")
+
+# Добавляем метод в класс I2CServoDriver
+I2CServoDriver.set_servo_angle = set_servo_angle
 
 def main():
     """Главная функция"""
-    print("🤖 УПРАВЛЕНИЕ МОТОРОМ ЧЕРЕЗ СЕРВОДРАЙВЕР")
+    print("🤖 УПРАВЛЕНИЕ МОТОРОМ ЧЕРЕЗ PCA9685")
     print("="*50)
-    print("📌 Raspberry Pi 5 → драйвер: 5V, GND, GPIO4, GPIO12")
-    print("📌 Мотор → драйвер канал 0")
-    print("📌 Паурбанк → питание драйвера")
+    print("📌 ПРАВИЛЬНОЕ ПОДКЛЮЧЕНИЕ PCA9685:")
+    print("   Pi Pin 2 (5V) → PCA9685 VCC")
+    print("   Pi Pin 6 (GND) → PCA9685 GND") 
+    print("   Pi Pin 3 (GPIO 2) → PCA9685 SDA")
+    print("   Pi Pin 5 (GPIO 3) → PCA9685 SCL")
+    print("   Паурбанк USB+ → PCA9685 V+")
+    print("   Паурбанк USB- → PCA9685 GND")
+    print("   Мотор → PCA9685 канал 0")
+    print("⚠️  GPIO 4 и GPIO 12 НЕ используются для I2C!")
     
     choice = input("""
 Выберите режим:
-1 - Тест I2C драйвера (PCA9685)
-2 - Тест GPIO драйвера
-3 - Поиск I2C устройств
-4 - Простое управление
-5 - Оба теста
+1 - Тест I2C драйвера PCA9685 ⭐ (РЕКОМЕНДУЕТСЯ)
+2 - Поиск I2C устройств
+3 - Простое управление серво
+4 - Проверка подключения
 
-Введите номер (1-5): """)
+Введите номер (1-4): """)
     
     try:
         if choice == "1":
             test_i2c_driver()
         elif choice == "2":
-            test_gpio_driver()
+            scan_i2c()
         elif choice == "3":
-            scan_i2c()
+            simple_servo_control()
         elif choice == "4":
-            simple_motor_control()
-        elif choice == "5":
-            print("🔄 Запуск всех тестов...")
-            scan_i2c()
-            time.sleep(2)
-            test_i2c_driver()
-            time.sleep(2) 
-            test_gpio_driver()
+            check_pca9685_connection()
         else:
-            print("❌ Неверный выбор, запускаю простое управление")
-            simple_motor_control()
+            print("❌ Неверный выбор, запускаю поиск I2C устройств")
+            scan_i2c()
     
     except KeyboardInterrupt:
         print("\n⚠️  Программа остановлена")
@@ -330,7 +392,8 @@ if __name__ == "__main__":
     main()
     
     print("\n💡 Если мотор не крутится:")
-    print("1. Проверьте питание от паурбанка")
-    print("2. Убедитесь что мотор на канале 0")
-    print("3. Для I2C: sudo raspi-config → Interface → I2C → Enable")
-    print("4. Проверьте подключение проводов")
+    print("1. ⚠️  ИСПРАВЬТЕ ПИТАНИЕ: 5V НЕ в 0е!")
+    print("2. Правильно: 5V → VCC драйвера, GND → GND драйвера")
+    print("3. Паурбанк (+) → VIN драйвера, паурбанк (-) → GND")
+    print("4. Проверьте что мотор на канале 0")
+    print("5. Для I2C: sudo raspi-config → Interface → I2C → Enable")
