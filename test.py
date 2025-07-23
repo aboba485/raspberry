@@ -1,318 +1,217 @@
 import RPi.GPIO as GPIO
 import time
-import threading
 
-class ServoDriverMotor:
-    def __init__(self, control_pin1=4, control_pin2=12, servo_channel=0):
+class PowerbankMotorTest:
+    def __init__(self, control_pin1=4, control_pin2=12):
         """
-        Motor control through servo driver
-        
-        Connections:
-        Raspberry Pi → Servo Driver:
-        • 5V → VCC
-        • GND → GND  
-        • GPIO 4 → Control Pin 1
-        • GPIO 12 → Control Pin 2
-        
-        Motor → Servo Driver:
-        • Motor connected to channel 0 on driver
+        Test motor with powerbank as external supply
         """
-        self.control_pin1 = control_pin1  # GPIO 4
-        self.control_pin2 = control_pin2  # GPIO 12
-        self.servo_channel = servo_channel
-        self.is_running = False
-        self.motor_thread = None
+        self.control_pin1 = control_pin1
+        self.control_pin2 = control_pin2
         
-        # Setup GPIO
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(self.control_pin1, GPIO.OUT)
         GPIO.setup(self.control_pin2, GPIO.OUT)
         
-        # Initialize pins to LOW
+        # Start with motor off
         GPIO.output(self.control_pin1, GPIO.LOW)
         GPIO.output(self.control_pin2, GPIO.LOW)
         
-        print(f"🤖 Servo Driver Motor Controller initialized")
+        print("🔋 Powerbank Motor Test Setup")
         print(f"📌 Control pins: GPIO {self.control_pin1}, GPIO {self.control_pin2}")
-        print(f"📌 Motor on driver channel: {self.servo_channel}")
     
-    def motor_forward(self, duration=None):
+    def test_powerbank_connection(self):
         """
-        Run motor forward
-        duration: time in seconds (None = indefinite)
+        Test if powerbank provides enough power
         """
-        print("➡️  Motor Forward")
+        print("\n🔍 POWERBANK CONNECTION TEST")
+        print("="*50)
+        
+        print("📋 Before starting, verify your connections:")
+        print("   Powerbank USB → Cut cable → Driver VIN")
+        print("   USB Red wire (+5V) → Driver VIN/VM")
+        print("   USB Black wire (GND) → Driver GND + Pi GND")
+        print("   Pi 5V → Driver VCC (logic power)")
+        print("   GPIO 4 → Driver IN1")
+        print("   GPIO 12 → Driver IN2")
+        
+        input("\nPress Enter when connections are ready...")
+        
+        print("\n1️⃣  Testing motor direction 1...")
+        print("👀 WATCH THE MOTOR - does it move?")
         GPIO.output(self.control_pin1, GPIO.HIGH)
         GPIO.output(self.control_pin2, GPIO.LOW)
         
-        if duration:
-            time.sleep(duration)
-            self.motor_stop()
-    
-    def motor_backward(self, duration=None):
-        """
-        Run motor backward  
-        duration: time in seconds (None = indefinite)
-        """
-        print("⬅️  Motor Backward")
+        time.sleep(3)
+        
+        print("\n2️⃣  Testing motor direction 2...")
+        print("👀 WATCH THE MOTOR - does it change direction?")
         GPIO.output(self.control_pin1, GPIO.LOW)
         GPIO.output(self.control_pin2, GPIO.HIGH)
         
-        if duration:
-            time.sleep(duration)
-            self.motor_stop()
-    
-    def motor_stop(self):
-        """
-        Stop motor
-        """
-        print("🛑 Motor Stopped")
+        time.sleep(3)
+        
+        print("\n3️⃣  Stopping motor...")
         GPIO.output(self.control_pin1, GPIO.LOW)
         GPIO.output(self.control_pin2, GPIO.LOW)
-        self.is_running = False
-    
-    def motor_continuous(self, direction="forward"):
-        """
-        Run motor continuously in background thread
-        direction: "forward" or "backward"
-        """
-        if self.is_running:
-            print("⚠️  Motor already running!")
-            return
         
-        self.is_running = True
+        # Get user feedback
+        result = input("\nDid the motor move? (y/n): ").lower()
         
-        def continuous_run():
-            print(f"🔄 Continuous motor run: {direction}")
-            while self.is_running:
-                if direction == "forward":
-                    GPIO.output(self.control_pin1, GPIO.HIGH)
-                    GPIO.output(self.control_pin2, GPIO.LOW)
-                else:
-                    GPIO.output(self.control_pin1, GPIO.LOW)
-                    GPIO.output(self.control_pin2, GPIO.HIGH)
-                time.sleep(0.1)
-        
-        self.motor_thread = threading.Thread(target=continuous_run)
-        self.motor_thread.daemon = True
-        self.motor_thread.start()
-    
-    def reverse_direction(self):
-        """
-        Reverse motor direction while running
-        """
-        if self.is_running:
-            print("🔄 Reversing direction")
-            # Read current state
-            pin1_state = GPIO.input(self.control_pin1)
-            pin2_state = GPIO.input(self.control_pin2)
-            
-            # Swap states
-            GPIO.output(self.control_pin1, pin2_state)
-            GPIO.output(self.control_pin2, pin1_state)
+        if result == 'y':
+            print("✅ SUCCESS! Powerbank works with your setup!")
+            return True
         else:
-            print("⚠️  Motor not running")
+            print("❌ Motor didn't move. Let's troubleshoot...")
+            return False
     
-    def test_motor(self):
+    def troubleshoot_powerbank(self):
         """
-        Basic motor test sequence
+        Troubleshooting steps for powerbank setup
         """
-        print("🔧 Testing motor connection...")
+        print("\n🔧 POWERBANK TROUBLESHOOTING")
+        print("="*40)
         
-        # Test forward
-        print("1️⃣  Forward test (3 seconds)")
-        self.motor_forward(3)
-        time.sleep(0.5)
+        print("Common issues with powerbank setup:")
         
-        # Test backward
-        print("2️⃣  Backward test (3 seconds)")
-        self.motor_backward(3)
-        time.sleep(0.5)
+        print("\n1️⃣  Voltage too low (5V vs 6-12V needed):")
+        print("   • Some drivers need minimum 6V")
+        print("   • Motor may be too weak to start")
+        print("   • Try a different driver or boost converter")
         
-        # Test stop
-        print("3️⃣  Stop test")
-        self.motor_stop()
+        print("\n2️⃣  Current limiting:")
+        print("   • Powerbanks limit current to ~2-3A")
+        print("   • Motor startup current might be higher")
+        print("   • Powerbank may shut off if overloaded")
         
-        print("✅ Motor test completed")
+        print("\n3️⃣  Connection issues:")
+        print("   • USB cable must be properly cut/stripped")
+        print("   • Red wire = +5V, Black wire = GND")
+        print("   • All grounds must be connected together")
+        
+        print("\n4️⃣  Driver compatibility:")
+        print("   • Some drivers need 6-12V minimum")
+        print("   • L298N works with 5V but reduced power")
+        print("   • Check your driver's minimum voltage")
+    
+    def test_with_load_simulation(self):
+        """
+        Test with gradual load increase
+        """
+        print("\n⚡ GRADUAL POWER TEST")
+        print("="*30)
+        
+        print("Testing with short pulses first...")
+        
+        for i in range(5):
+            print(f"Pulse {i+1}/5 - Duration: {0.2 * (i+1):.1f}s")
+            
+            GPIO.output(self.control_pin1, GPIO.HIGH)
+            GPIO.output(self.control_pin2, GPIO.LOW)
+            time.sleep(0.2 * (i+1))
+            
+            GPIO.output(self.control_pin1, GPIO.LOW)
+            GPIO.output(self.control_pin2, GPIO.LOW)
+            time.sleep(0.5)
+            
+            moved = input(f"Did motor move on pulse {i+1}? (y/n): ").lower()
+            if moved == 'y':
+                print(f"✅ Motor responds at {0.2 * (i+1):.1f}s duration")
+                return True
+        
+        print("❌ Motor not responding to any pulses")
+        return False
     
     def cleanup(self):
         """
-        Clean up GPIO resources
+        Clean up GPIO
         """
-        self.motor_stop()
-        time.sleep(0.5)
+        GPIO.output(self.control_pin1, GPIO.LOW)
+        GPIO.output(self.control_pin2, GPIO.LOW)
         GPIO.cleanup()
         print("✅ GPIO cleaned up")
 
-def keyboard_control():
+def powerbank_solutions():
     """
-    Keyboard control for motor
+    Alternative solutions if powerbank doesn't work
     """
-    motor = ServoDriverMotor(control_pin1=4, control_pin2=12, servo_channel=0)
-    
-    print("\n" + "="*50)
-    print("🎮 MOTOR CONTROL VIA SERVO DRIVER")
-    print("="*50)
-    print("Commands:")
-    print("f + Enter - FORWARD")
-    print("b + Enter - BACKWARD")
-    print("s + Enter - STOP")
-    print("c + Enter - CONTINUOUS FORWARD")
-    print("r + Enter - REVERSE DIRECTION")
-    print("t + Enter - TEST MOTOR")
-    print("x + Enter - EXIT")
+    print("\n💡 SOLUTIONS IF POWERBANK DOESN'T WORK")
     print("="*50)
     
-    try:
-        while True:
-            command = input("Command: ").lower().strip()
-            
-            if command == 'f':
-                motor.motor_forward(2)  # Run for 2 seconds
-            elif command == 'b':
-                motor.motor_backward(2)  # Run for 2 seconds
-            elif command == 's':
-                motor.motor_stop()
-            elif command == 'c':
-                motor.motor_continuous("forward")
-            elif command == 'r':
-                motor.reverse_direction()
-            elif command == 't':
-                motor.test_motor()
-            elif command == 'x':
-                print("👋 Exiting...")
-                break
-            else:
-                print("❓ Use: f, b, s, c, r, t, x")
-                
-    except KeyboardInterrupt:
-        print("\n⚠️  Interrupted by user")
-    finally:
-        motor.cleanup()
+    print("1️⃣  Use USB Boost Converter:")
+    print("   • Converts 5V → 9V or 12V")
+    print("   • Available on Amazon/eBay")
+    print("   • Small module, easy to use")
+    
+    print("\n2️⃣  Use 9V Battery:")
+    print("   • Simple 9V battery + battery holder")
+    print("   • Higher voltage = better motor performance")
+    print("   • Connect 9V(+) to driver VIN, 9V(-) to GND")
+    
+    print("\n3️⃣  Use Power Adapter:")
+    print("   • 9V-12V wall adapter")
+    print("   • More reliable than batteries")
+    print("   • Check current rating (2A+ recommended)")
+    
+    print("\n4️⃣  Different Driver:")
+    print("   • Some drivers work better with 5V")
+    print("   • Motor driver HATs designed for Pi")
+    print("   • Check if your driver supports 5V operation")
 
-def demo_sequence():
+def main():
     """
-    Demonstration sequence
+    Main powerbank testing program
     """
-    motor = ServoDriverMotor()
+    print("🔋 POWERBANK MOTOR TESTING")
+    print("="*40)
+    
+    tester = PowerbankMotorTest()
     
     try:
-        print("\n=== MOTOR DEMO SEQUENCE ===")
-        
-        # Basic test
-        motor.test_motor()
-        
-        print("\n🔄 Continuous operation demo")
-        
-        # Continuous forward
-        print("▶️  Continuous forward (5 seconds)")
-        motor.motor_continuous("forward")
-        time.sleep(5)
-        
-        # Reverse direction
-        print("🔄 Reversing direction")
-        motor.reverse_direction()
-        time.sleep(3)
-        
-        # Stop
-        motor.motor_stop()
-        
-        print("✅ Demo completed!")
-        
-    finally:
-        motor.cleanup()
+        choice = input("""
+Test options:
+1 - Full powerbank connection test
+2 - Gradual power test (pulses)
+3 - View troubleshooting info
+4 - View alternative solutions
 
-def quick_test():
-    """
-    Quick motor test
-    """
-    motor = ServoDriverMotor(control_pin1=4, control_pin2=12)
-    
-    try:
-        print("🚀 Quick Test")
-        motor.motor_forward(1)
-        time.sleep(0.5)
-        motor.motor_backward(1)
-        motor.motor_stop()
-        print("✅ Quick test done")
-    finally:
-        motor.cleanup()
-
-# Main program
-if __name__ == "__main__":
-    print("🤖 SERVO DRIVER MOTOR CONTROLLER")
-    print("="*50)
-    print("📌 Connections:")
-    print("   Raspberry Pi → Servo Driver:")
-    print("   • 5V → VCC")
-    print("   • GND → GND")
-    print("   • GPIO 4 → Control Pin 1")
-    print("   • GPIO 12 → Control Pin 2")
-    print("   • Motor → Driver Channel 0")
-    print("="*50)
-    
-    choice = input("""
-Select mode:
-1 - Keyboard Control
-2 - Demo Sequence  
-3 - Quick Test
-4 - Custom Test
-
-Enter number (1-4): """)
-    
-    try:
+Enter (1-4): """)
+        
         if choice == "1":
-            keyboard_control()
+            success = tester.test_powerbank_connection()
+            if not success:
+                tester.troubleshoot_powerbank()
+        
         elif choice == "2":
-            demo_sequence()
+            success = tester.test_with_load_simulation()
+            if not success:
+                powerbank_solutions()
+        
         elif choice == "3":
-            quick_test()
+            tester.troubleshoot_powerbank()
+        
         elif choice == "4":
-            # Custom test area
-            motor = ServoDriverMotor()
-            try:
-                print("🔧 Custom test - modify this section as needed")
-                motor.test_motor()
-                
-                # Add your custom code here
-                print("Adding 5-second continuous run...")
-                motor.motor_continuous("forward")
-                time.sleep(5)
-                motor.motor_stop()
-                
-            finally:
-                motor.cleanup()
+            powerbank_solutions()
+        
         else:
-            print("❌ Invalid choice, running quick test")
-            quick_test()
-            
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        print("💡 Check your connections and try again")
+            print("Running full test...")
+            success = tester.test_powerbank_connection()
+            if not success:
+                tester.troubleshoot_powerbank()
+                powerbank_solutions()
+    
+    except KeyboardInterrupt:
+        print("\n⚠️  Test interrupted")
+    
     finally:
-        try:
-            GPIO.cleanup()
-        except:
-            pass
+        tester.cleanup()
 
-# Quick functions for direct use
-def run_forward(seconds=2):
-    """Quick forward run"""
-    motor = ServoDriverMotor()
-    try:
-        motor.motor_forward(seconds)
-    finally:
-        motor.cleanup()
-
-def run_backward(seconds=2):
-    """Quick backward run"""
-    motor = ServoDriverMotor()
-    try:
-        motor.motor_backward(seconds)
-    finally:
-        motor.cleanup()
-
-# Usage examples:
-# run_forward(3)    # Run forward for 3 seconds
-# run_backward(2)   # Run backward for 2 seconds
-# quick_test()      # Quick test sequence
+if __name__ == "__main__":
+    main()
+    
+    print("\n🎯 QUICK CHECKLIST:")
+    print("✓ Powerbank connected to driver VIN")
+    print("✓ All grounds connected together") 
+    print("✓ GPIO signals reaching driver")
+    print("✓ Motor connected to driver output")
+    print("✓ Driver minimum voltage requirements met")
